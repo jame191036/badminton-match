@@ -1,10 +1,13 @@
 import { useMemo, useState } from 'react'
 import { useLocalStorage } from './hooks/useLocalStorage'
+import { useTheme } from './hooks/useTheme'
 import { pickNextMatch } from './utils/pairing'
 import PlayerForm from './components/PlayerForm'
 import PlayerQueue from './components/PlayerQueue'
 import CourtBoard from './components/CourtBoard'
 import MatchHistory from './components/MatchHistory'
+import BillingPanel from './components/BillingPanel'
+import ThemeToggle from './components/ThemeToggle'
 import './app.css'
 
 function makeInitialCourts() {
@@ -15,9 +18,11 @@ function makeInitialCourts() {
 }
 
 export default function App() {
+  const { theme, toggleTheme } = useTheme()
   const [players, setPlayers] = useLocalStorage('badminton:players', [])
   const [courts, setCourts] = useLocalStorage('badminton:courts', makeInitialCourts())
   const [history, setHistory] = useLocalStorage('badminton:history', [])
+  const [billing, setBilling] = useLocalStorage('badminton:billing', { courtFee: '', shuttleFee: '' })
   const [queueSeq, setQueueSeq] = useState(0)
 
   const waitingCount = useMemo(
@@ -35,9 +40,16 @@ export default function App() {
         gamesPlayed: 0,
         queuedAt: Date.now() + queueSeq,
         status: 'waiting',
+        paying: true,
       },
     ])
     setQueueSeq((s) => s + 1)
+  }
+
+  function togglePaying(id) {
+    setPlayers((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, paying: !(p.paying !== false) } : p))
+    )
   }
 
   function toggleRest(id) {
@@ -126,6 +138,9 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="app-header">
+        <div className="header-top">
+          <ThemeToggle theme={theme} onToggle={toggleTheme} />
+        </div>
         <div className="header-inner">
           <span className="eyebrow mono">จัดก๊วนแบด</span>
           <h1 className="display">จับคู่ลงคอร์ต 🏸</h1>
@@ -156,6 +171,18 @@ export default function App() {
 
         <section className="panel">
           <PlayerQueue players={players} onToggleRest={toggleRest} onRemove={removePlayer} />
+        </section>
+
+        <div className="net-divider" />
+
+        <section className="panel">
+          <h2>คิดเงิน</h2>
+          <BillingPanel
+            players={players}
+            billing={billing}
+            onChangeBilling={setBilling}
+            onTogglePaying={togglePaying}
+          />
         </section>
 
         <div className="net-divider" />

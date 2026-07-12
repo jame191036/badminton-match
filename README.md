@@ -1,99 +1,17 @@
-# Badminton UI
+# React + Vite
 
-Badminton UI เป็นเว็บแอปสำหรับจัดการคิวและจับคู่ผู้เล่นแบดมินตันแบบง่าย ๆ โดยอัตโนมัติ เหมาะสำหรับการเล่นดับเบิลในกลุ่มเล็ก ๆ หรือการแข่งขันภายในทีม
+This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
-## ฟีเจอร์หลัก
+Currently, two official plugins are available:
 
-- เพิ่มผู้เล่นและเลือกระดับฝีมือแบบมือใหม่ / มือกลาง / มือเก่ง
-- จัดคิวผู้เล่นอัตโนมัติ โดยคำนึงถึงจำนวนเกมที่เล่นแล้วและลำดับเข้าคิว
-- จับคู่ผู้เล่นเป็นทีม 2 ต่อ 2 แบบสมดุลโดยอัตโนมัติ
-- จัดการคอร์ตได้หลายคอร์ตพร้อมเพิ่มและลบคอร์ต
-- ปล่อยให้ผู้เล่นพักจากคิวหรือลบผู้เล่นออกจากระบบ
-- แสดงประวัติการแข่งขันล่าสุด และบันทึกข้อมูลไว้ในเบราว์เซอร์ผ่าน localStorage
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
 
-## เทคโนโลยีที่ใช้
+## React Compiler
 
-- React 19
-- Vite
-- ESLint
+The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
 
-## วิธีติดตั้ง
+## Expanding the ESLint configuration
 
-ต้องมี Node.js เวอร์ชัน 18 ขึ้นไป และ npm ติดตั้งอยู่แล้ว
-
-1. Clone โปรเจกต์
-   ```bash
-   git clone <repository-url>
-   cd badminton-ui
-   ```
-
-2. ติดตั้ง dependency
-   ```bash
-   npm install
-   ```
-
-3. รันโปรเจกต์ในโหมดพัฒนา
-   ```bash
-   npm run dev
-   ```
-
-4. เปิดเบราว์เซอร์ที่
-   ```text
-   http://localhost:5173
-   ```
-
-## วิธี build สำหรับ production
-
-```bash
-npm run build
-```
-
-ไฟล์ build ที่สร้างขึ้นจะอยู่ในโฟลเดอร์ dist
-
-## วิธี preview หลัง build
-
-```bash
-npm run preview
-```
-
-## วิธีการทำงานของโปรแกรม
-
-1. เพิ่มผู้เล่นจากฟอร์มด้านบน โดยระบุชื่อและระดับฝีมือ
-2. ระบบจะจัดผู้เล่นไว้ในคิวรอลงคอร์ตตามลำดับที่เหมาะสม
-3. เมื่อมีผู้เล่นพร้อมเพียงพอ ระบบจะจับคู่ 4 คนเป็นทีม 2 ต่อ 2 และจัดลงคอร์ต
-4. หลังจบเกม สามารถกดปุ่มจบเกมเพื่อคืนผู้เล่นกลับสู่คิวและบันทึกประวัติการแข่งขัน
-5. ผู้เล่นบางคนสามารถกดปุ่มพักเพื่อออกจากคิวชั่วคราว หรือลบออกจากระบบได้
-
-## โครงสร้างโปรเจกต์
-
-```text
-src/
-  App.jsx              # โค้ดหลักสำหรับจัดการสถานะและ flow ของแอป
-  components/
-    PlayerForm.jsx     # แบบฟอร์มเพิ่มผู้เล่น
-    PlayerQueue.jsx    # แสดงคิวผู้เล่นและตัวเลือกพัก/ลบ
-    CourtBoard.jsx     # แสดงคอร์ตและการจับคู่ลงคอร์ต
-    MatchHistory.jsx   # แสดงประวัติการแข่งขัน
-  hooks/
-    useLocalStorage.js # custom hook สำหรับเก็บข้อมูลใน localStorage
-  utils/
-    pairing.js         # ตรรกะการจับคู่และคำนวณทีมที่สมดุล
-```
-
-## ข้อมูลที่เก็บไว้
-
-ข้อมูลผู้เล่น คิว คอร์ต และประวัติการแข่งขันจะถูกเก็บไว้ในเบราว์เซอร์ของผู้ใช้ผ่าน localStorage ดังนั้นข้อมูลจะอยู่เฉพาะในเครื่องนั้น ๆ เท่านั้น
-
-## ส่งขึ้น GitHub
-
-หากต้องการอัปโหลดโปรเจกต์ขึ้น GitHub สามารถใช้คำสั่งต่อไปนี้
-
-```bash
-git init
-git add .
-git commit -m "Initial commit"
-git branch -M main
-git remote add origin https://github.com/<your-username>/<your-repo>.git
-git push -u origin main
-```
-
+If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+# guanteen
