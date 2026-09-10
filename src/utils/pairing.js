@@ -9,6 +9,37 @@ export function skillLabel(value) {
   return SKILL_LEVELS.find((s) => s.value === value)?.label ?? '-'
 }
 
+export const QUEUE_MODES = [
+  { value: 'sequential', label: 'ตามลำดับคิว', hint: 'เอา 4 คนแรกในคิวลงเลย' },
+  { value: 'rotate', label: 'สลับคู่', hint: 'เลี่ยงการเจอคู่เดิมซ้ำ ๆ' },
+]
+
+// น้ำหนักของโหมด rotate — ปรับตรงนี้ได้ถ้ารู้สึกว่ามันสลับมาก/น้อยเกินไป
+const WEIGHT = {
+  together: 10, // เคยอยู่ทีมเดียวกัน — สิ่งที่อยากเลี่ยงที่สุด
+  against: 3, //  เคยเจอกันคนละฝั่ง — เลี่ยงรองลงมา
+  skillGap: 2, //  ผลต่างฝีมือของสองทีม
+  queueSkip: 1, // ข้ามคิวคนที่รออยู่ก่อน — กันไม่ให้เลี่ยงคู่ซ้ำจนคิวเพี้ยน
+}
+
+// จำนวนคนหัวคิวที่หยิบมาพิจารณาในโหมด rotate
+// ยิ่งกว้างยิ่งเลี่ยงคู่ซ้ำได้ดี แต่ก็ข้ามคิวได้ไกลขึ้น
+const ROTATE_WINDOW = 8
+
+export function pairKey(id1, id2) {
+  return id1 < id2 ? `${id1}|${id2}` : `${id2}|${id1}`
+}
+
+function lookupPair(pairStats, id1, id2) {
+  return pairStats?.get(pairKey(id1, id2)) ?? { together: 0, against: 0 }
+}
+
+// เรียงตามความเป็นธรรม: เล่นน้อยสุดก่อน ถ้าเท่ากันเอาคนที่รอนานกว่า
+function byFairness(p1, p2) {
+  if (p1.gamesPlayed !== p2.gamesPlayed) return p1.gamesPlayed - p2.gamesPlayed
+  return p1.queuedAt - p2.queuedAt
+}
+
 // Given exactly 4 players, find the 2v2 split that minimizes the
 // skill-sum gap between the two teams.
 export function bestTeamSplit(fourPlayers) {
@@ -32,17 +63,94 @@ export function bestTeamSplit(fourPlayers) {
   return best
 }
 
+function skillGap({ teamA, teamB }) {
+  const sumA = teamA.reduce((s, p) => s + p.skill, 0)
+  const sumB = teamB.reduce((s, p) => s + p.skill, 0)
+  return Math.abs(sumA - sumB)
+}
+
+// ยิ่งคะแนนต่ำยิ่งดี
+function scoreSplit(split, pairStats, queueSkip) {
+  let together = 0
+  let against = 0
+
+  for (const team of [split.teamA, split.teamB]) {
+    const [p1, p2] = team
+    together += lookupPair(pairStats, p1.id, p2.id).together
+  }
+
+  for (const p1 of split.teamA) {
+    for (const p2 of split.teamB) {
+      against += lookupPair(pairStats, p1.id, p2.id).against
+    }
+  }
+
+  return (
+    together * WEIGHT.together +
+    against * WEIGHT.against +
+    skillGap(split) * WEIGHT.skillGap +
+    queueSkip * WEIGHT.queueSkip
+  )
+}
+
+// ทุกวิธีเลือก 4 คนจากรายชื่อ (คืน index มาด้วยเพื่อคิดค่าข้ามคิว)
+function* chooseFour(list) {
+  for (let i = 0; i < list.length - 3; i++)
+    for (let j = i + 1; j < list.length - 2; j++)
+      for (let k = j + 1; k < list.length - 1; k++)
+        for (let l = k + 1; l < list.length; l++)
+          yield { players: [list[i], list[j], list[k], list[l]], indices: [i, j, k, l] }
+}
+
+function splitsOf(four) {
+  const [a, b, c, d] = four
+  return [
+    { teamA: [a, b], teamB: [c, d] },
+    { teamA: [a, c], teamB: [b, d] },
+    { teamA: [a, d], teamB: [b, c] },
+  ]
+}
+
 // Pick the 4 players who have waited longest / played least from the
 // waiting pool, then split them into balanced teams.
-export function pickNextMatch(waitingPlayers) {
+//
+// mode 'rotate' จะดูคนหัวคิวกว้างขึ้น (ROTATE_WINDOW คน) แล้วเลือกชุดที่
+// ให้คะแนนรวมต่ำสุด — คู่ซ้ำแพงสุด รองมาคือเจอกันซ้ำ ฝีมือห่าง และข้ามคิว
+// การเลี่ยงคู่ซ้ำเป็น soft constraint เสมอ: ถ้าเหลือรอคิวพอดี 4 คน
+// ก็ยังจับได้ตามปกติ ไม่มีทางที่ระบบจะปฏิเสธการจับคู่เพราะคู่ซ้ำ
+export function pickNextMatch(waitingPlayers, options = {}) {
   if (waitingPlayers.length < 4) return null
 
-  const sorted = [...waitingPlayers].sort((p1, p2) => {
-    if (p1.gamesPlayed !== p2.gamesPlayed) return p1.gamesPlayed - p2.gamesPlayed
-    return p1.queuedAt - p2.queuedAt
-  })
+  const { mode = 'sequential', pairStats = null } = options
+  const sorted = [...waitingPlayers].sort(byFairness)
 
-  const four = sorted.slice(0, 4)
-  const { teamA, teamB } = bestTeamSplit(four)
-  return { teamA, teamB, playerIds: four.map((p) => p.id) }
+  if (mode !== 'rotate' || !pairStats || pairStats.size === 0) {
+    const four = sorted.slice(0, 4)
+    const { teamA, teamB } = bestTeamSplit(four)
+    return { teamA, teamB, playerIds: four.map((p) => p.id) }
+  }
+
+  const window = sorted.slice(0, Math.min(ROTATE_WINDOW, sorted.length))
+
+  let best = null
+  let bestScore = Infinity
+
+  for (const { players, indices } of chooseFour(window)) {
+    // 0,1,2,3 คือชุดหัวคิวพอดี = ไม่ข้ามใครเลย
+    const queueSkip = indices.reduce((s, idx) => s + idx, 0) - 6
+
+    for (const split of splitsOf(players)) {
+      const score = scoreSplit(split, pairStats, queueSkip)
+      if (score < bestScore) {
+        bestScore = score
+        best = split
+      }
+    }
+  }
+
+  return {
+    teamA: best.teamA,
+    teamB: best.teamB,
+    playerIds: [...best.teamA, ...best.teamB].map((p) => p.id),
+  }
 }

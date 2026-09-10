@@ -1,0 +1,74 @@
+import { skillLabel } from '../utils/pairing'
+
+function formatMinutes(min) {
+  if (!min) return '—'
+  if (min < 60) return `${min} นาที`
+  const h = Math.floor(min / 60)
+  const m = min % 60
+  return m === 0 ? `${h} ชม.` : `${h} ชม. ${m} นาที`
+}
+
+const STATUS_LABEL = {
+  waiting: 'รอคิว',
+  playing: 'อยู่ในคอร์ต',
+  resting: 'พัก',
+}
+
+export default function SessionStats({ players, summary }) {
+  if (players.length === 0) {
+    return <p className="empty-state small">ยังไม่มีผู้เล่น</p>
+  }
+
+  // เล่นเยอะสุดขึ้นก่อน คนที่ยังไม่ได้ลงเลยจะไปอยู่ท้ายสุด
+  const ranked = [...players].sort(
+    (a, b) => b.gamesPlayed - a.gamesPlayed || b.minutesPlayed - a.minutesPlayed
+  )
+  const maxGames = ranked[0]?.gamesPlayed ?? 0
+  const minGames = ranked[ranked.length - 1]?.gamesPlayed ?? 0
+
+  return (
+    <div className="stats">
+      {summary && (
+        <div className="stats-summary">
+          <div className="stat-tile">
+            <span className="stat-value mono">{summary.finishedGames}</span>
+            <span className="stat-label">เกมที่จบแล้ว</span>
+          </div>
+          <div className="stat-tile">
+            <span className="stat-value mono">{summary.playerCount}</span>
+            <span className="stat-label">ผู้เล่น</span>
+          </div>
+          <div className="stat-tile">
+            <span className="stat-value mono">{summary.courtCount}</span>
+            <span className="stat-label">คอร์ตที่จอง</span>
+          </div>
+          <div className="stat-tile">
+            <span className="stat-value mono">{formatMinutes(summary.totalPlayMinutes)}</span>
+            <span className="stat-label">เวลาเล่นรวมทุกคอร์ต</span>
+          </div>
+        </div>
+      )}
+
+      {maxGames - minGames >= 2 && (
+        <p className="stats-note">
+          ตอนนี้คนเล่นเยอะสุดกับน้อยสุดต่างกัน {maxGames - minGames} เกม —
+          ระบบจะเลือกคนที่เล่นน้อยกว่าลงก่อนอยู่แล้ว
+        </p>
+      )}
+
+      <ul className="stats-list">
+        {ranked.map((p) => (
+          <li key={p.id} className="stats-item">
+            <span className="stats-name">{p.name}</span>
+            <span className="stats-skill mono">{skillLabel(p.skill)}</span>
+            <span className={`stats-status status-${p.status}`}>
+              {STATUS_LABEL[p.status] ?? p.status}
+            </span>
+            <span className="stats-games mono">{p.gamesPlayed} เกม</span>
+            <span className="stats-minutes mono">{formatMinutes(p.minutesPlayed)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
-import { pickNextMatch } from '../utils/pairing'
+import { pairKey, pickNextMatch } from '../utils/pairing'
 
 // map แถวจาก DB (snake_case) ให้เป็น shape เดิมที่ components ใช้อยู่ (camelCase)
 function mapPlayer(row) {
@@ -15,41 +15,96 @@ function mapPlayer(row) {
   }
 }
 
-export function useBadmintonData(sessionId) {
+export function useBadmintonData(sessionId, queueMode = 'sequential') {
   const [players, setPlayers] = useState([])
   const [courts, setCourts] = useState([])
   const [history, setHistory] = useState([])
+  const [summary, setSummary] = useState(null)
+  // Map: pairKey(a,b) -> { together, against } ใช้โดยโหมดคิว 'rotate'
+  const [pairStats, setPairStats] = useState(() => new Map())
   const [loading, setLoading] = useState(true)
 
   const refetchAll = useCallback(async () => {
     if (!sessionId) return
 
-    const [playersRes, courtsRes, activeMatchesRes, historyRes] = await Promise.all([
+    const [
+      playersRes,
+      courtsRes,
+      activeMatchesRes,
+      historyRes,
+      statsRes,
+      summaryRes,
+      pairsRes,
+    ] = await Promise.all([
       supabase.from('players').select('*').eq('session_id', sessionId).order('queue_seq'),
       supabase.from('courts').select('*').eq('session_id', sessionId).order('sort_order'),
       supabase
         .from('matches')
-        .select('id, court_id, match_players(player_id, player_name, skill, team)')
+        .select('id, court_id, status, started_at, match_players(player_id, player_name, skill, team)')
         .eq('session_id', sessionId)
         .is('ended_at', null),
       supabase.from('v_match_history').select('*').eq('session_id', sessionId).limit(30),
+      supabase.from('v_session_player_stats').select('player_id, games, minutes').eq('session_id', sessionId),
+      supabase.from('v_session_summary').select('*').eq('session_id', sessionId).single(),
+      supabase.from('v_pair_history').select('*').eq('session_id', sessionId),
     ])
 
-    if (playersRes.data) setPlayers(playersRes.data.map(mapPlayer))
+    setPairStats(
+      new Map(
+        (pairsRes.data ?? []).map((r) => [
+          pairKey(r.player_a, r.player_b),
+          { together: r.together_count, against: r.against_count },
+        ])
+      )
+    )
+
+    if (playersRes.data) {
+      // เวลาที่เล่นจริงคิดจาก started_at/ended_at ของแมตช์ ผ่าน view
+      // (games_played บน players ยังเป็นตัวหลักที่ใช้เรียงคิว)
+      const statsById = new Map(
+        (statsRes.data ?? []).map((s) => [s.player_id, s])
+      )
+      setPlayers(
+        playersRes.data.map((row) => ({
+          ...mapPlayer(row),
+          minutesPlayed: Math.round(Number(statsById.get(row.id)?.minutes ?? 0)),
+        }))
+      )
+    }
+
+    if (summaryRes.data) {
+      setSummary({
+        playerCount: summaryRes.data.player_count,
+        courtCount: summaryRes.data.court_count,
+        bookedHours: Number(summaryRes.data.booked_hours),
+        finishedGames: summaryRes.data.finished_games,
+        totalPlayMinutes: Math.round(Number(summaryRes.data.total_play_minutes)),
+      })
+    }
 
     if (courtsRes.data) {
       const matchByCourtId = new Map((activeMatchesRes.data ?? []).map((m) => [m.court_id, m]))
       setCourts(
         courtsRes.data.map((c) => {
           const m = matchByCourtId.get(c.id)
-          if (!m) return { id: c.id, name: c.name, match: null }
+          const base = { id: c.id, name: c.name, hours: c.hours ?? 0 }
+          if (!m) return { ...base, match: null }
           const teamA = m.match_players
             .filter((mp) => mp.team === 'A')
             .map((mp) => ({ id: mp.player_id, name: mp.player_name, skill: mp.skill }))
           const teamB = m.match_players
             .filter((mp) => mp.team === 'B')
             .map((mp) => ({ id: mp.player_id, name: mp.player_name, skill: mp.skill }))
-          return { id: c.id, name: c.name, match: { id: m.id, teamA, teamB } }
+          return {
+            ...base,
+            match: {
+              id: m.id,
+              status: m.status,
+              startedAt: m.started_at ? new Date(m.started_at).getTime() : null,
+              teamA,
+              teamB,
+            },
+          }
         })
       )
     }
@@ -107,10 +162,16 @@ export function useBadmintonData(sessionId) {
 
   // ---------- actions ----------
 
+  // ผ่าน RPC เพราะต้องสร้าง/อัปเดตแถวใน members ไปพร้อมกันใน transaction เดียว
+  // (รายชื่อสมาชิกจึงสะสมขึ้นมาเองโดยไม่ต้องมีหน้าจัดการแยก)
   const addPlayer = useCallback(
     async (name, skill) => {
       if (!sessionId) return
-      const { error } = await supabase.from('players').insert({ session_id: sessionId, name, skill })
+      const { error } = await supabase.rpc('add_player', {
+        p_session_id: sessionId,
+        p_name: name,
+        p_skill: skill,
+      })
       if (error) console.error(error)
     },
     [sessionId]
@@ -154,6 +215,12 @@ export function useBadmintonData(sessionId) {
     if (error) console.error(error)
   }, [sessionId, courts.length])
 
+  // ชั่วโมงที่จองของแต่ละคอร์ต — ใช้คิดค่าสนาม (ดู BillingPanel)
+  const updateCourtHours = useCallback(async (courtId, hours) => {
+    const { error } = await supabase.from('courts').update({ hours }).eq('id', courtId)
+    if (error) console.error(error)
+  }, [])
+
   const removeCourt = useCallback(async () => {
     const last = courts[courts.length - 1]
     if (!last) return
@@ -164,7 +231,7 @@ export function useBadmintonData(sessionId) {
   const assignCourt = useCallback(
     async (courtId) => {
       const waiting = players.filter((p) => p.status === 'waiting')
-      const match = pickNextMatch(waiting)
+      const match = pickNextMatch(waiting, { mode: queueMode, pairStats })
       if (!match) return
       const { error } = await supabase.rpc('assign_court', {
         p_court_id: courtId,
@@ -173,7 +240,42 @@ export function useBadmintonData(sessionId) {
       })
       if (error) console.error(error)
     },
-    [players]
+    [players, queueMode, pairStats]
+  )
+
+  // pending -> playing (เริ่มจับเวลา)
+  const startMatch = useCallback(
+    async (courtId) => {
+      const court = courts.find((c) => c.id === courtId)
+      if (!court?.match) return
+      const { error } = await supabase.rpc('start_match', { p_match_id: court.match.id })
+      if (error) console.error(error)
+    },
+    [courts]
+  )
+
+  // เอาคนที่ยังไม่พร้อมออกไปพัก แล้วดึงคนแรกในคิวมาแทน (ทำได้เฉพาะตอน pending)
+  const substitutePlayer = useCallback(
+    async (courtId, playerId) => {
+      const court = courts.find((c) => c.id === courtId)
+      if (!court?.match) return
+      const { error } = await supabase.rpc('substitute_player', {
+        p_match_id: court.match.id,
+        p_player_id: playerId,
+      })
+      if (error) console.error(error)
+    },
+    [courts]
+  )
+
+  const cancelMatch = useCallback(
+    async (courtId) => {
+      const court = courts.find((c) => c.id === courtId)
+      if (!court?.match) return
+      const { error } = await supabase.rpc('cancel_match', { p_match_id: court.match.id })
+      if (error) console.error(error)
+    },
+    [courts]
   )
 
   const finishMatch = useCallback(
@@ -190,6 +292,7 @@ export function useBadmintonData(sessionId) {
     players,
     courts,
     history,
+    summary,
     loading,
     addPlayer,
     removePlayer,
@@ -197,7 +300,11 @@ export function useBadmintonData(sessionId) {
     toggleRest,
     addCourt,
     removeCourt,
+    updateCourtHours,
     assignCourt,
+    startMatch,
+    substitutePlayer,
+    cancelMatch,
     finishMatch,
   }
 }
