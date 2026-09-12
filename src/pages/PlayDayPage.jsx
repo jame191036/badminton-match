@@ -33,9 +33,12 @@ export default function PlayDayPage() {
   const confirm = useConfirm()
   const {
     day,
+    canEdit,
     billing,
     loading: dayLoading,
     error: dayError,
+    saveError,
+    clearSaveError,
     updateBilling,
     updateQueueMode,
     startDay,
@@ -133,12 +136,13 @@ export default function PlayDayPage() {
           </div>
 
           <div className="page-head-actions">
-            {day.status === 'planned' && (
+            {!canEdit && <span className="badge badge-shared">ดูได้อย่างเดียว</span>}
+            {canEdit && day.status === 'planned' && (
               <button className="btn-primary" type="button" onClick={() => run(startDay)}>
                 เริ่มวันเล่น
               </button>
             )}
-            {day.status === 'playing' && (
+            {canEdit && day.status === 'playing' && (
               <button
                 className="btn-primary"
                 type="button"
@@ -166,10 +170,18 @@ export default function PlayDayPage() {
 
         {/* error ของคำสั่งในกระดาน (จัดคอร์ต เพิ่มคน สลับตัว ฯลฯ)
             ลอยค้างไว้จนกว่าจะกดปิด เพราะบางอันเกิดตอนเลื่อนอยู่ล่างจอ */}
-        {actionError && (
+        {(actionError || saveError) && (
           <div className="toast-error" role="alert">
-            <span>{actionError}</span>
-            <button type="button" className="btn-icon" onClick={clearActionError} aria-label="ปิด">
+            <span>{actionError || saveError}</span>
+            <button
+              type="button"
+              className="btn-icon"
+              aria-label="ปิด"
+              onClick={() => {
+                clearActionError()
+                clearSaveError()
+              }}
+            >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                 <path d="M6 6l12 12M18 6 6 18" />
               </svg>
@@ -217,12 +229,13 @@ export default function PlayDayPage() {
 
           <section className="panel">
             <h2>ผู้เล่น ({players.filter((p) => p.status !== 'absent').length} คน)</h2>
-            <PlayerForm onAdd={addPlayer} />
+            {canEdit && <PlayerForm onAdd={addPlayer} />}
             {boardLoading ? (
               <SkeletonQueue />
             ) : (
               <PlayerQueue
                 players={players}
+                readOnly={!canEdit}
                 onToggleRest={toggleRest}
                 onRemove={removePlayer}
                 onSetAttendance={setAttendance}
@@ -242,6 +255,7 @@ export default function PlayDayPage() {
             ) : (
               <CourtBoard
                 courts={courts}
+                readOnly={!canEdit}
                 waitingCount={waitingCount}
                 queueMode={day.queueMode}
                 onChangeQueueMode={updateQueueMode}
@@ -263,6 +277,7 @@ export default function PlayDayPage() {
             <BillingPanel
               players={players}
               courts={courts}
+              readOnly={!canEdit}
               billing={billing}
               onChangeBilling={updateBilling}
               onTogglePaying={togglePaying}

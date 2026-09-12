@@ -16,7 +16,7 @@ function formatHours(n) {
 // ชั่วโมงของคอร์ตเก็บอยู่ใน DB และมี realtime คอยอัปเดต ถ้าผูก input
 // ตรงกับค่าจาก server ตัวเลขจะกระตุกระหว่างพิมพ์ (เช่นพิมพ์ "1." ค้างไม่ได้)
 // เลยถือ draft ไว้ในเครื่องระหว่างพิมพ์ แล้วค่อย commit ตอนออกจากช่อง
-function CourtHoursInput({ court, onCommit }) {
+function CourtHoursInput({ court, onCommit, readOnly }) {
   const [draft, setDraft] = useState(() => (court.hours ? String(court.hours) : ''))
   const [editing, setEditing] = useState(false)
   const [lastFromServer, setLastFromServer] = useState(court.hours)
@@ -42,6 +42,7 @@ function CourtHoursInput({ court, onCommit }) {
       inputMode="decimal"
       placeholder="0"
       aria-label={`ชั่วโมงที่จองของ${court.name}`}
+      disabled={readOnly}
       value={draft}
       onFocus={() => setEditing(true)}
       onChange={(e) => setDraft(e.target.value)}
@@ -54,6 +55,7 @@ function CourtHoursInput({ court, onCommit }) {
 export default function BillingPanel({
   players,
   courts,
+  readOnly = false,
   billing,
   onChangeBilling,
   onTogglePaying,
@@ -90,6 +92,7 @@ export default function BillingPanel({
             inputMode="decimal"
             placeholder="0"
             value={billing.hourlyRate}
+            disabled={readOnly}
             onChange={(e) => onChangeBilling({ ...billing, hourlyRate: e.target.value })}
           />
         </label>
@@ -102,7 +105,7 @@ export default function BillingPanel({
           {courts.map((court) => (
             <li key={court.id} className="court-hours-item">
               <span className="court-hours-name">{court.name}</span>
-              <CourtHoursInput court={court} onCommit={onChangeCourtHours} />
+              <CourtHoursInput court={court} onCommit={onChangeCourtHours} readOnly={readOnly} />
               <span className="court-hours-unit">ชม.</span>
               <span className="billing-amount mono">
                 {formatBaht(toNumber(court.hours) * hourlyRate)} บาท
@@ -123,6 +126,7 @@ export default function BillingPanel({
             inputMode="numeric"
             placeholder="0"
             value={billing.shuttleCount}
+            disabled={readOnly}
             onChange={(e) => onChangeBilling({ ...billing, shuttleCount: e.target.value })}
           />
         </label>
@@ -134,6 +138,7 @@ export default function BillingPanel({
             inputMode="decimal"
             placeholder="0"
             value={billing.shuttlePrice}
+            disabled={readOnly}
             onChange={(e) => onChangeBilling({ ...billing, shuttlePrice: e.target.value })}
           />
         </label>
@@ -175,6 +180,7 @@ export default function BillingPanel({
                   <input
                     type="checkbox"
                     checked={isPaying}
+                    disabled={readOnly}
                     onChange={() => onTogglePaying(p.id)}
                   />
                   <span>{p.name}</span>

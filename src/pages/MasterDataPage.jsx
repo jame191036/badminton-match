@@ -233,7 +233,15 @@ function MembersTab({ userId, canEdit, canDelete }) {
                   value={m.skill}
                   disabled={!canEdit}
                   aria-label={`ระดับมือของ ${m.name}`}
-                  onChange={(e) => updateMember(m.id, { default_skill: Number(e.target.value) })}
+                  // ต้อง catch เอง — updateMember โยน error และ onChange
+                  // ไม่ได้ await ให้ ถ้าไม่ดักจะกลายเป็น unhandled rejection
+                  onChange={async (e) => {
+                    try {
+                      await updateMember(m.id, { default_skill: Number(e.target.value) })
+                    } catch (err) {
+                      setFormError(err.message)
+                    }
+                  }}
                 >
                   {SKILL_LEVELS.map((s) => (
                     <option key={s.value} value={s.value}>
