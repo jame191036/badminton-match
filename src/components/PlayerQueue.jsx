@@ -1,4 +1,5 @@
 import { skillLabel } from '../utils/pairing'
+import AsyncButton from './AsyncButton'
 
 const SKILL_CLASS = { 1: 'skill-1', 2: 'skill-2', 3: 'skill-3' }
 
@@ -32,15 +33,14 @@ export default function PlayerQueue({
               <span className="games-count mono" title="จำนวนเกมที่เล่นแล้ว">{p.gamesPlayed} เกม</span>
               {!readOnly && (
                 <>
-                  <button className="btn-ghost" onClick={() => onToggleRest(p.id)}>พัก</button>
-                  <button
-                    className="btn-ghost"
+                  <AsyncButton onClick={() => onToggleRest(p.id)}>พัก</AsyncButton>
+                  <AsyncButton
                     title="ลงชื่อไว้แต่วันนี้ไม่มา — จะไม่ถูกนับเป็นคนหารค่าใช้จ่าย"
                     onClick={() => onSetAttendance(p.id, false)}
                   >
                     ไม่มา
-                  </button>
-                  <button className="btn-ghost btn-danger" onClick={() => onRemove(p.id)}>ลบ</button>
+                  </AsyncButton>
+                  <AsyncButton className="btn-ghost btn-danger" onClick={() => onRemove(p.id)}>ลบ</AsyncButton>
                 </>
               )}
             </li>
@@ -59,8 +59,8 @@ export default function PlayerQueue({
                 <span className={`skill-badge ${SKILL_CLASS[p.skill]}`}>{skillLabel(p.skill)}</span>
                 {!readOnly && (
                   <>
-                    <button className="btn-ghost" onClick={() => onToggleRest(p.id)}>กลับเข้าคิว</button>
-                    <button className="btn-ghost btn-danger" onClick={() => onRemove(p.id)}>ลบ</button>
+                    <AsyncButton onClick={() => onToggleRest(p.id)}>กลับเข้าคิว</AsyncButton>
+                    <AsyncButton className="btn-ghost btn-danger" onClick={() => onRemove(p.id)}>ลบ</AsyncButton>
                   </>
                 )}
               </li>
@@ -80,10 +80,8 @@ export default function PlayerQueue({
                 <span className={`skill-badge ${SKILL_CLASS[p.skill]}`}>{skillLabel(p.skill)}</span>
                 {!readOnly && (
                   <>
-                    <button className="btn-ghost" onClick={() => onSetAttendance(p.id, true)}>
-                      มาแล้ว
-                    </button>
-                    <button className="btn-ghost btn-danger" onClick={() => onRemove(p.id)}>ลบ</button>
+                    <AsyncButton onClick={() => onSetAttendance(p.id, true)}>มาแล้ว</AsyncButton>
+                    <AsyncButton className="btn-ghost btn-danger" onClick={() => onRemove(p.id)}>ลบ</AsyncButton>
                   </>
                 )}
               </li>

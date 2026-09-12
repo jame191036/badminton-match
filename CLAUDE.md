@@ -105,4 +105,4 @@ Realtime must be enabled for `players`, `courts`, `matches`, `match_players`, `s
 
 ## Note
 
-`README.md` is still the stock Vite template and does not describe this project.
+`README.md` is the user-facing guide: what the app does, how to run a session, the money rules, and setup. Keep it in Thai and keep it free of the internals — this file is where the invariants and reasoning live.

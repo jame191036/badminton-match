@@ -9,6 +9,7 @@ import SearchBox from '../components/SearchBox'
 import { SkeletonList } from '../components/Skeleton'
 import { useConfirm } from '../hooks/useConfirm'
 import { SKILL_LEVELS } from '../utils/pairing'
+import AsyncButton from '../components/AsyncButton'
 
 const TABS = [
   { id: 'members', label: 'ผู้เล่น' },
@@ -250,9 +251,8 @@ function MembersTab({ userId, canEdit, canDelete }) {
                   ))}
                 </select>
                 {canDelete && (
-                <button
+                <AsyncButton
                   className="btn-ghost btn-danger"
-                  type="button"
                   onClick={async () => {
                     const ok = await confirm({
                       title: `ลบ "${m.name}" ออกจากรายชื่อ?`,
@@ -264,7 +264,7 @@ function MembersTab({ userId, canEdit, canDelete }) {
                   }}
                 >
                   ลบ
-                </button>
+                </AsyncButton>
                 )}
               </div>
             </li>
@@ -369,9 +369,8 @@ function VenuesTab({ userId, canEdit, canDelete }) {
               </div>
               <div className="master-row-actions">
                 {canDelete && (
-                  <button
+                  <AsyncButton
                     className="btn-ghost btn-danger"
-                    type="button"
                     onClick={async () => {
                       const ok = await confirm({
                         title: `ลบสนาม "${v.name}"?`,
@@ -383,7 +382,7 @@ function VenuesTab({ userId, canEdit, canDelete }) {
                     }}
                   >
                     ลบ
-                  </button>
+                  </AsyncButton>
                 )}
               </div>
             </li>
@@ -545,9 +544,8 @@ function BrandRow({
           </EditableName>
         </div>
         {canDelete && (
-        <button
+        <AsyncButton
           className="btn-ghost btn-danger"
-          type="button"
           onClick={async () => {
             const ok = await confirm({
               title: `ลบยี่ห้อ "${brand.name}"?`,
@@ -562,7 +560,7 @@ function BrandRow({
           }}
         >
           ลบยี่ห้อ
-        </button>
+        </AsyncButton>
         )}
       </div>
 
@@ -585,9 +583,8 @@ function BrandRow({
                 </EditableName>
               </div>
               {canDelete && (
-                <button
+                <AsyncButton
                   className="btn-ghost btn-danger"
-                  type="button"
                   onClick={async () => {
                     const ok = await confirm({
                       title: `ลบรุ่น "${m.name}"?`,
@@ -599,7 +596,7 @@ function BrandRow({
                   }}
                 >
                   ลบ
-                </button>
+                </AsyncButton>
               )}
             </li>
           ))}

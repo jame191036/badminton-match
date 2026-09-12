@@ -7,6 +7,7 @@ import ClubSettingsPanel from '../components/ClubSettingsPanel'
 import { SkeletonHead, SkeletonList } from '../components/Skeleton'
 import { todayISO } from '../utils/date'
 import { useConfirm } from '../hooks/useConfirm'
+import AsyncButton from '../components/AsyncButton'
 
 const STATUS_LABEL = {
   planned: 'จองไว้',
@@ -269,12 +270,11 @@ function DayRow({ day, clubId, canEdit, overdue = false, onStart, onCancel }) {
 
       {canEdit && day.status === 'planned' && (
         <div className="day-row-actions">
-          <button className="btn-primary" type="button" onClick={onStart}>
+          <AsyncButton className="btn-primary" busyLabel="กำลังเริ่ม..." onClick={onStart}>
             เริ่มวันนี้
-          </button>
-          <button
+          </AsyncButton>
+          <AsyncButton
             className="btn-ghost btn-danger"
-            type="button"
             onClick={async () => {
               const ok = await confirm({
                 title: 'ยกเลิกวันเล่นนี้?',
@@ -283,11 +283,11 @@ function DayRow({ day, clubId, canEdit, overdue = false, onStart, onCancel }) {
                 cancelLabel: 'ไม่ใช่ตอนนี้',
                 danger: true,
               })
-              if (ok) onCancel()
+              if (ok) await onCancel()
             }}
           >
             ยกเลิก
-          </button>
+          </AsyncButton>
         </div>
       )}
     </li>

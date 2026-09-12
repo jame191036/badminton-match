@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import ThemeToggle from './ThemeToggle'
+import AsyncButton from './AsyncButton'
 
 const NAV = [
   { to: '/', label: 'ก๊วนของฉัน', end: true },
@@ -11,9 +12,9 @@ export default function AppLayout({ user, theme, onToggleTheme, onSignOut }) {
     <div className="app-shell">
       <header className="app-header">
         <div className="header-top">
-          <button className="btn-ghost btn-on-dark" onClick={onSignOut}>
+          <AsyncButton className="btn-ghost btn-on-dark" busyLabel="กำลังออก..." onClick={onSignOut}>
             ออกจากระบบ
-          </button>
+          </AsyncButton>
           <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         </div>
 
