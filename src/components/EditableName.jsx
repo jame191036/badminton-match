@@ -10,7 +10,7 @@ import { useState } from 'react'
  *   fields: [{ key, value, placeholder, required }]
  *   onSave: (values) => Promise   // values = { [key]: string }
  */
-export default function EditableName({ fields, onSave, label = 'ชื่อ', children }) {
+export default function EditableName({ fields, onSave, label = 'ชื่อ', readOnly = false, children }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState({})
   const [error, setError] = useState('')
@@ -58,6 +58,9 @@ export default function EditableName({ fields, onSave, label = 'ชื่อ', c
       setBusy(false)
     }
   }
+
+  // ไม่มีสิทธิ์แก้ (เช่นถูกเชิญมาเป็นผู้ชม) — แสดงชื่อเฉยๆ ไม่ต้องมีปุ่มดินสอ
+  if (readOnly) return children
 
   if (!editing) {
     return (

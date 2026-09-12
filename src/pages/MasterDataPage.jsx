@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
+import { useClubs } from '../hooks/useClubs'
 import { useMembers } from '../hooks/useMembers'
 import { useMasterList } from '../hooks/useMasterList'
 import { useShuttleModels } from '../hooks/useShuttleModels'
@@ -17,7 +18,37 @@ const TABS = [
 
 export default function MasterDataPage() {
   const { user } = useOutletContext()
+  const { clubs } = useClubs(user?.id)
   const [tab, setTab] = useState('members')
+  const [ownerId, setOwnerId] = useState(user?.id ?? '')
+
+  /**
+   * ข้อมูลหลักผูกกับ "บัญชีเจ้าของก๊วน" ไม่ใช่กับก๊วน
+   * ถ้าถูกเชิญไปช่วยจัดก๊วนของคนอื่น ต้องดู/แก้ชุดของเขาได้ด้วย
+   * ไม่งั้นหน้านี้จะว่างเปล่าทั้งที่ใช้ข้อมูลของเขาอยู่ตอนจัดวันเล่น
+   *
+   * ไม่มีชื่อ/อีเมลเจ้าของให้แสดง (authenticated อ่าน auth.users ไม่ได้)
+   * เลยใช้ชื่อก๊วนของเขาเป็นป้ายแทน ซึ่งสื่อกว่าอีเมลด้วยซ้ำ
+   */
+  const owners = [{ id: user?.id, label: 'ของฉัน', mine: true, canEdit: true }]
+  for (const club of clubs) {
+    if (club.ownerId === user?.id) continue
+    // viewer ดูได้อย่างเดียว ถ้าเจ้าของคนเดียวแชร์มาหลายก๊วนคนละบทบาท
+    // ให้ยึดบทบาทที่สูงสุด — มีก๊วนไหนที่เป็น editor ก็แก้ข้อมูลหลักได้
+    const editable = club.role === 'owner' || club.role === 'editor'
+    const found = owners.find((o) => o.id === club.ownerId)
+    if (found) {
+      found.label = `${found.label}, ${club.name}`
+      found.canEdit = found.canEdit || editable
+    } else {
+      owners.push({ id: club.ownerId, label: club.name, mine: false, canEdit: editable })
+    }
+  }
+
+  const activeOwner = owners.find((o) => o.id === ownerId) ?? owners[0]
+  const canEdit = Boolean(activeOwner?.canEdit)
+  // ลบได้เฉพาะข้อมูลของตัวเอง (RLS ฝั่ง DB บังคับอีกชั้นอยู่แล้ว)
+  const canDelete = Boolean(activeOwner?.mine)
 
   return (
     <>
@@ -26,6 +57,33 @@ export default function MasterDataPage() {
         <p className="panel-lead">
           ตั้งไว้ล่วงหน้าครั้งเดียว แล้วเลือกใช้ตอนจัดวันเล่น — ใช้ร่วมกันได้ทุกก๊วน
         </p>
+
+        {owners.length > 1 && (
+          <div className="owner-switch">
+            <span className="field-label">ข้อมูลของ</span>
+            <div className="auth-tabs" role="tablist">
+              {owners.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeOwner?.id === o.id}
+                  className={`auth-tab${activeOwner?.id === o.id ? ' is-active' : ''}`}
+                  onClick={() => setOwnerId(o.id)}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            {!canDelete && (
+              <p className="panel-hint">
+                {canEdit
+                  ? 'คุณเพิ่มและแก้ไขได้ แต่ลบไม่ได้ — สงวนไว้ให้เจ้าของก๊วน'
+                  : 'คุณดูได้อย่างเดียว เพราะถูกเชิญมาในฐานะผู้ชม'}
+              </p>
+            )}
+          </div>
+        )}
 
         <div className="auth-tabs" role="tablist">
           {TABS.map((t) => (
@@ -42,9 +100,28 @@ export default function MasterDataPage() {
           ))}
         </div>
 
-        {tab === 'members' && <MembersTab userId={user?.id} />}
-        {tab === 'venues' && <VenuesTab userId={user?.id} />}
-        {tab === 'shuttles' && <ShuttlesTab userId={user?.id} />}
+        {/* key = บังคับให้ remount เมื่อสลับเจ้าของ ไม่งั้นคำค้นและฟอร์มค้างข้ามชุด */}
+        {tab === 'members' && (
+          <MembersTab key={activeOwner?.id}
+            userId={activeOwner?.id}
+            canEdit={canEdit}
+            canDelete={canDelete}
+          />
+        )}
+        {tab === 'venues' && (
+          <VenuesTab key={activeOwner?.id}
+            userId={activeOwner?.id}
+            canEdit={canEdit}
+            canDelete={canDelete}
+          />
+        )}
+        {tab === 'shuttles' && (
+          <ShuttlesTab key={activeOwner?.id}
+            userId={activeOwner?.id}
+            canEdit={canEdit}
+            canDelete={canDelete}
+          />
+        )}
       </section>
     </>
   )
@@ -52,7 +129,7 @@ export default function MasterDataPage() {
 
 /* ---------------- ผู้เล่น ---------------- */
 
-function MembersTab({ userId }) {
+function MembersTab({ userId, canEdit, canDelete }) {
   const confirm = useConfirm()
   const { members, loading, error, addMember, updateMember, removeMember } = useMembers(userId)
   const [name, setName] = useState('')
@@ -82,31 +159,33 @@ function MembersTab({ userId }) {
 
   return (
     <>
-      <form className="player-form" onSubmit={handleAdd}>
-        <input
-          type="text"
-          placeholder="ชื่อผู้เล่น"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-        />
-        <input
-          type="text"
-          placeholder="หมายเหตุ เช่น เพื่อนพี่เอ (ไม่บังคับ)"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-        />
-        <select value={skill} onChange={(e) => setSkill(e.target.value)}>
-          {SKILL_LEVELS.map((s) => (
-            <option key={s.value} value={s.value}>
-              {s.label}
-            </option>
-          ))}
-        </select>
-        <button className="btn-primary" type="submit" disabled={busy || !name.trim()}>
-          เพิ่มชื่อ
-        </button>
-      </form>
+      {canEdit && (
+        <form className="player-form" onSubmit={handleAdd}>
+          <input
+            type="text"
+            placeholder="ชื่อผู้เล่น"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+          />
+          <input
+            type="text"
+            placeholder="หมายเหตุ เช่น เพื่อนพี่เอ (ไม่บังคับ)"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+          <select value={skill} onChange={(e) => setSkill(e.target.value)}>
+            {SKILL_LEVELS.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+          <button className="btn-primary" type="submit" disabled={busy || !name.trim()}>
+            เพิ่มชื่อ
+          </button>
+        </form>
+      )}
 
       <MasterError message={formError || error} />
 
@@ -131,6 +210,7 @@ function MembersTab({ userId }) {
             <li key={m.id} className="master-row">
               <div className="master-row-main">
                 <EditableName
+                  readOnly={!canEdit}
                   label="ชื่อผู้เล่น"
                   fields={[
                     { key: 'name', value: m.name, placeholder: 'ชื่อผู้เล่น', required: true },
@@ -151,6 +231,7 @@ function MembersTab({ userId }) {
               <div className="master-row-actions">
                 <select
                   value={m.skill}
+                  disabled={!canEdit}
                   aria-label={`ระดับมือของ ${m.name}`}
                   onChange={(e) => updateMember(m.id, { default_skill: Number(e.target.value) })}
                 >
@@ -160,6 +241,7 @@ function MembersTab({ userId }) {
                     </option>
                   ))}
                 </select>
+                {canDelete && (
                 <button
                   className="btn-ghost btn-danger"
                   type="button"
@@ -175,6 +257,7 @@ function MembersTab({ userId }) {
                 >
                   ลบ
                 </button>
+                )}
               </div>
             </li>
           ))}
@@ -186,7 +269,7 @@ function MembersTab({ userId }) {
 
 /* ---------------- สนาม ---------------- */
 
-function VenuesTab({ userId }) {
+function VenuesTab({ userId, canEdit, canDelete }) {
   const confirm = useConfirm()
   const { items, loading, error, add, update, remove } = useMasterList('venues', userId)
   const [name, setName] = useState('')
@@ -220,24 +303,26 @@ function VenuesTab({ userId }) {
         เพราะราคาเปลี่ยนได้ทุกครั้งที่ไป และยอดของวันที่จ่ายไปแล้วต้องไม่ขยับตาม
       </p>
 
-      <form className="player-form" onSubmit={handleAdd}>
-        <input
-          type="text"
-          placeholder="ชื่อสนาม"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-        />
-        <input
-          type="text"
-          placeholder="หมายเหตุ เช่น ซอยลาดพร้าว 15 (ไม่บังคับ)"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-        />
-        <button className="btn-primary" type="submit" disabled={busy || !name.trim()}>
-          เพิ่มสนาม
-        </button>
-      </form>
+      {canEdit && (
+        <form className="player-form" onSubmit={handleAdd}>
+          <input
+            type="text"
+            placeholder="ชื่อสนาม"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+          />
+          <input
+            type="text"
+            placeholder="หมายเหตุ เช่น ซอยลาดพร้าว 15 (ไม่บังคับ)"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+          <button className="btn-primary" type="submit" disabled={busy || !name.trim()}>
+            เพิ่มสนาม
+          </button>
+        </form>
+      )}
 
       <MasterError message={formError || error} />
 
@@ -262,6 +347,7 @@ function VenuesTab({ userId }) {
             <li key={v.id} className="master-row">
               <div className="master-row-main">
                 <EditableName
+                  readOnly={!canEdit}
                   label="ชื่อสนาม"
                   fields={[
                     { key: 'name', value: v.name, placeholder: 'ชื่อสนาม', required: true },
@@ -274,21 +360,23 @@ function VenuesTab({ userId }) {
                 </EditableName>
               </div>
               <div className="master-row-actions">
-                <button
-                  className="btn-ghost btn-danger"
-                  type="button"
-                  onClick={async () => {
-                    const ok = await confirm({
-                      title: `ลบสนาม "${v.name}"?`,
-                      message: 'วันเล่นเก่ายังจำชื่อสนามไว้ ไม่กระทบประวัติ',
-                      confirmLabel: 'ลบสนาม',
-                      danger: true,
-                    })
-                    if (ok) remove(v.id)
-                  }}
-                >
-                  ลบ
-                </button>
+                {canDelete && (
+                  <button
+                    className="btn-ghost btn-danger"
+                    type="button"
+                    onClick={async () => {
+                      const ok = await confirm({
+                        title: `ลบสนาม "${v.name}"?`,
+                        message: 'วันเล่นเก่ายังจำชื่อสนามไว้ ไม่กระทบประวัติ',
+                        confirmLabel: 'ลบสนาม',
+                        danger: true,
+                      })
+                      if (ok) remove(v.id)
+                    }}
+                  >
+                    ลบ
+                  </button>
+                )}
               </div>
             </li>
           ))}
@@ -300,7 +388,7 @@ function VenuesTab({ userId }) {
 
 /* ---------------- ยี่ห้อลูกแบด ---------------- */
 
-function ShuttlesTab({ userId }) {
+function ShuttlesTab({ userId, canEdit, canDelete }) {
   const { items, loading, error, add, update, remove } = useMasterList('shuttle_brands', userId)
   const models = useShuttleModels(items.map((b) => b.id))
   const [name, setName] = useState('')
@@ -338,24 +426,26 @@ function ShuttlesTab({ userId }) {
         ยอดของวันที่จ่ายกันไปแล้วจะได้ไม่ขยับตามราคาใหม่
       </p>
 
-      <form className="player-form" onSubmit={handleAdd}>
-        <input
-          type="text"
-          placeholder="ยี่ห้อ เช่น RSL"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-        />
-        <input
-          type="text"
-          placeholder="หมายเหตุ (ไม่บังคับ)"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-        />
-        <button className="btn-primary" type="submit" disabled={busy || !name.trim()}>
-          เพิ่มยี่ห้อ
-        </button>
-      </form>
+      {canEdit && (
+        <form className="player-form" onSubmit={handleAdd}>
+          <input
+            type="text"
+            placeholder="ยี่ห้อ เช่น RSL"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+          />
+          <input
+            type="text"
+            placeholder="หมายเหตุ (ไม่บังคับ)"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+          <button className="btn-primary" type="submit" disabled={busy || !name.trim()}>
+            เพิ่มยี่ห้อ
+          </button>
+        </form>
+      )}
 
       <MasterError message={formError || error || models.error} />
 
@@ -386,6 +476,8 @@ function ShuttlesTab({ userId }) {
               onAddModel={(values) => models.addModel(b.id, values)}
               onUpdateModel={models.updateModel}
               onRemoveModel={models.removeModel}
+              canEdit={canEdit}
+              canDelete={canDelete}
             />
           ))}
         </ul>
@@ -402,6 +494,8 @@ function BrandRow({
   onAddModel,
   onUpdateModel,
   onRemoveModel,
+  canEdit,
+  canDelete,
 }) {
   const confirm = useConfirm()
   const [modelName, setModelName] = useState('')
@@ -429,6 +523,7 @@ function BrandRow({
       <div className="brand-head">
         <div className="master-row-main">
           <EditableName
+                  readOnly={!canEdit}
             label="ยี่ห้อ"
             fields={[
               { key: 'name', value: brand.name, placeholder: 'ยี่ห้อ', required: true },
@@ -441,6 +536,7 @@ function BrandRow({
             {brand.note && <span className="master-note">{brand.note}</span>}
           </EditableName>
         </div>
+        {canDelete && (
         <button
           className="btn-ghost btn-danger"
           type="button"
@@ -459,6 +555,7 @@ function BrandRow({
         >
           ลบยี่ห้อ
         </button>
+        )}
       </div>
 
       {models.length > 0 && (
@@ -467,6 +564,7 @@ function BrandRow({
             <li key={m.id} className="model-row">
               <div className="master-row-main">
                 <EditableName
+                  readOnly={!canEdit}
                   label="รุ่น"
                   fields={[
                     { key: 'name', value: m.name, placeholder: 'รุ่น', required: true },
@@ -478,44 +576,48 @@ function BrandRow({
                   {m.note && <span className="master-note">{m.note}</span>}
                 </EditableName>
               </div>
-              <button
-                className="btn-ghost btn-danger"
-                type="button"
-                onClick={async () => {
-                  const ok = await confirm({
-                    title: `ลบรุ่น "${m.name}"?`,
-                    message: `ยี่ห้อ ${brand.name} ยังอยู่ ลบเฉพาะรุ่นนี้`,
-                    confirmLabel: 'ลบรุ่น',
-                    danger: true,
-                  })
-                  if (ok) onRemoveModel(m.id)
-                }}
-              >
-                ลบ
-              </button>
+              {canDelete && (
+                <button
+                  className="btn-ghost btn-danger"
+                  type="button"
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: `ลบรุ่น "${m.name}"?`,
+                      message: `ยี่ห้อ ${brand.name} ยังอยู่ ลบเฉพาะรุ่นนี้`,
+                      confirmLabel: 'ลบรุ่น',
+                      danger: true,
+                    })
+                    if (ok) onRemoveModel(m.id)
+                  }}
+                >
+                  ลบ
+                </button>
+              )}
             </li>
           ))}
         </ul>
       )}
 
-      <form className="player-form model-form" onSubmit={handleAddModel}>
-        <input
-          type="text"
-          placeholder={`เพิ่มรุ่นของ ${brand.name} เช่น Classic`}
-          value={modelName}
-          onChange={(e) => setModelName(e.target.value)}
-          required
-        />
-        <input
-          type="text"
-          placeholder="หมายเหตุ เช่น ลูกเร็ว 77 (ไม่บังคับ)"
-          value={modelNote}
-          onChange={(e) => setModelNote(e.target.value)}
-        />
-        <button className="btn-ghost" type="submit" disabled={busy || !modelName.trim()}>
-          + เพิ่มรุ่น
-        </button>
-      </form>
+      {canEdit && (
+        <form className="player-form model-form" onSubmit={handleAddModel}>
+          <input
+            type="text"
+            placeholder={`เพิ่มรุ่นของ ${brand.name} เช่น Classic`}
+            value={modelName}
+            onChange={(e) => setModelName(e.target.value)}
+            required
+          />
+          <input
+            type="text"
+            placeholder="หมายเหตุ เช่น ลูกเร็ว 77 (ไม่บังคับ)"
+            value={modelNote}
+            onChange={(e) => setModelNote(e.target.value)}
+          />
+          <button className="btn-ghost" type="submit" disabled={busy || !modelName.trim()}>
+            + เพิ่มรุ่น
+          </button>
+        </form>
+      )}
 
       <MasterError message={error} />
     </li>

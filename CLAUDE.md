@@ -55,7 +55,11 @@ Prices may be left at 0 when the day is created — the real numbers are usually
 
 **Attendance:** players picked in advance start as `waiting`. `set_player_attendance` flips them to `absent` when they do not show up, which takes them out of the queue **and out of the billing divisor**. Without it, one no-show silently skews everyone's share.
 
-**Sharing:** `club_access` maps a user to a club as `owner` / `editor` / `viewer`. Editors can run a day but cannot share the club onward. Editors pick from the *club owner's* master lists, which is why the master tables have a second read policy gated on `has_master_access`.
+**Sharing:** `club_access` maps a user to a club as `owner` / `editor` / `viewer`. Editors can run a day but cannot share the club onward.
+
+Master data belongs to the **club owner's account**, not to the club, so everyone working on a shared club reads and writes that one owner's lists. Three policies express this on each master table: `has_master_access` grants SELECT to anyone the owner shared a club with, `has_master_edit_access` grants INSERT and UPDATE to those who are `owner`/`editor` there, and DELETE stays with the owner alone (it is irreversible and hits every club of theirs, not just the one the editor helps with). `add_player` writing walk-ins into the owner's `members` is the same rule, which is why edit rights had to match it.
+
+`MasterDataPage` therefore shows a switch for *whose* master data you are viewing, built from `v_my_clubs`. It labels each owner by their club names because `authenticated` cannot read `auth.users` to get an email.
 
 ## Database (`supabase/`)
 
