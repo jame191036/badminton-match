@@ -123,6 +123,12 @@
 
 .btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(232,96,76,0.3); }
 
+/* <Link> ที่อยากให้หน้าตาเหมือนปุ่ม (a ไม่มี padding/จัดกลางเหมือน button) */
+.btn-link {
+  display: inline-block;
+  text-decoration: none;
+}
+
 .btn-primary:disabled {
   background: var(--border);
   color: var(--text-faint);
@@ -187,10 +193,11 @@
 .skill-3 { background: var(--skill3-bg); color: var(--skill3-text); }
 
 /* Court board */
+/* เหลือแต่ปุ่มเพิ่ม/ลดคอร์ต (หัวข้ออยู่ที่หน้าแม่) จึงดันไปชิดขวา */
 .court-board-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   margin-bottom: 16px;
 }
 .court-controls { display: flex; align-items: center; gap: 10px; color: var(--text); }
@@ -473,6 +480,33 @@
 .stats-games { min-width: 52px; text-align: right; }
 .stats-minutes { min-width: 92px; text-align: right; color: var(--text-faint); font-size: 0.82rem; }
 
+/* ---------- หัวตาราง (สถิติ / ประวัติ) ---------- */
+/* ใช้คลาสเดียวกับแถวข้อมูลเพื่อให้คอลัมน์ตรงกัน แล้วลบกรอบกับพื้นหลังออก */
+.stats-head,
+.history-head {
+  margin-bottom: 8px;
+  padding-top: 0;
+  padding-bottom: 8px;
+  border: none;
+  border-bottom: 1.5px solid var(--border);
+  border-radius: 0;
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-faint);
+}
+
+/* ล้างสไตล์เฉพาะตัวของเซลล์ข้อมูล ไม่ให้หัวตารางกลายเป็นป้ายหรือชิป */
+.stats-head span,
+.history-head span {
+  padding: 0;
+  background: none;
+  border-radius: 0;
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+}
+
 /* History */
 .history-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .history-item {
@@ -509,6 +543,8 @@
   /* จอแคบ: ให้ทีมขึ้นบรรทัดใหม่เต็มความกว้าง แทนที่จะบีบจนอ่านไม่ออก */
   .history-item { flex-wrap: wrap; gap: 8px; }
   .history-teams { flex: 1 1 100%; order: 3; }
+  /* พอแถวขึ้นบรรทัดใหม่แล้ว หัวตารางไม่ตรงกับคอลัมน์อีกต่อไป ซ่อนไปเลย */
+  .history-head { display: none; }
 }
 
 /* Billing */
@@ -679,27 +715,51 @@
   color: var(--court);
 }
 
+/* หัวข้อซ้าย ปุ่มหลักขวา — จัดกึ่งกลางแนวตั้งให้ปุ่มอยู่ระดับเดียวกับชื่อ
+   (ลิงก์ย้อนกลับต้องอยู่นอกกล่องนี้ ไม่งั้นปุ่มจะไปเทียบกับบรรทัดลิงก์แทน) */
 .page-head {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 16px;
   flex-wrap: wrap;
   margin-bottom: 18px;
 }
 
+.page-head > div:first-child { flex: 1 1 auto; min-width: 0; }
+
 .page-head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
+/* ปุ่มย้อนกลับ — ทำให้เป็นปุ่มจริง ๆ ไม่ใช่ข้อความเล็ก ๆ
+   เพราะเป็นทางออกหลักของทุกหน้า และต้องกดด้วยนิ้วโป้งได้ */
 .back-link {
-  display: inline-block;
-  margin-bottom: 8px;
-  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  margin-bottom: 10px;
+  margin-left: -12px; /* ดึงกลับให้ตัวอักษรตรงแนวกับหัวข้อด้านล่าง */
+  padding: 9px 14px;
+  border-radius: 10px;
+  font-size: 0.95rem;
   font-weight: 600;
   color: var(--text-muted);
   text-decoration: none;
+  transition: color 0.15s ease, background-color 0.15s ease;
 }
 
-.back-link:hover { color: var(--court); }
+.back-link::before {
+  content: '←';
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.back-link:hover {
+  color: var(--court);
+  background: var(--surface-muted);
+}
+
+.back-link:active { background: var(--border-muted); }
 
 .panel-lead {
   margin: 0 0 16px;
@@ -713,6 +773,26 @@
   color: var(--text-faint);
   font-size: 0.82rem;
   line-height: 1.55;
+}
+
+/* บรรทัดเวลาใต้หัวข้อวันเล่น */
+.day-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+/* ชั่วโมงที่จอง — ข้อมูลรอง ทำให้จางกว่าเวลานัด */
+.day-meta-sub {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-faint);
+  font-size: 0.78rem;
 }
 
 .empty-text {
@@ -1222,6 +1302,34 @@
   color: var(--text-faint);
 }
 
+/* ---------- เลือกผู้เล่นจากรายชื่อ (หน้าวันเล่น) ---------- */
+.add-from-list {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  margin-top: 10px;
+  padding: 9px 16px;
+}
+
+.picker-panel {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1.5px solid var(--border-muted);
+  border-radius: 12px;
+  background: var(--surface-muted);
+}
+
+.picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.picker-panel .search-box { background: var(--surface); }
+
 .member-picker.is-selected {
   padding-bottom: 12px;
   margin-bottom: 4px;
@@ -1322,6 +1430,215 @@
   border: 1.5px solid var(--border-muted);
   border-radius: 12px;
   background: var(--surface-muted);
+}
+
+/* ---------- ปฏิทินเลือกวัน (เขียนเอง เพื่อให้เป็น พ.ศ. และเดือนไทย) ---------- */
+.date-picker { position: relative; }
+
+.date-picker-trigger {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 46px;
+  padding: 11px 13px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.95rem;
+  text-align: left;
+}
+
+.date-picker-trigger:hover { border-color: var(--text-faintest); }
+.date-picker-trigger svg { flex: none; color: var(--court); }
+.date-picker-trigger .is-placeholder { color: var(--text-faintest); }
+
+.date-picker-pop {
+  position: absolute;
+  z-index: 25;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  padding: 12px;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.date-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.date-picker-month { font-weight: 700; font-size: 0.95rem; }
+
+.date-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.date-picker-weekday {
+  padding: 4px 0;
+  text-align: center;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text-faint);
+}
+
+.date-picker-weekday.is-weekend { color: var(--coral); }
+
+.date-picker-day {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.date-picker-day:hover { background: var(--surface-muted); }
+.date-picker-day.is-weekend { color: var(--coral); }
+
+/* วันนี้ทำเป็นขอบ ส่วนวันที่เลือกทำเป็นพื้นทึบ — สองสถานะนี้ซ้อนกันได้ */
+.date-picker-day.is-today { box-shadow: inset 0 0 0 1.5px var(--border); }
+
+.date-picker-day.is-selected {
+  background: var(--court);
+  color: #fff;
+  font-weight: 700;
+  box-shadow: none;
+}
+
+.date-picker-today {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  text-align: center;
+}
+
+/* ---------- ปุ่มลัดเลือกวัน/เวลา ---------- */
+.quick-picks {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.quick-picks-label {
+  font-size: 0.78rem;
+  color: var(--text-faint);
+  margin-right: 2px;
+}
+
+.quick-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 7px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  font-weight: 600;
+  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+
+.quick-chip:hover { border-color: var(--court); color: var(--court); }
+
+.quick-chip.is-on {
+  border-color: var(--court);
+  background: var(--court);
+  color: #fff;
+}
+
+/* วันที่ต่อท้ายชื่อวัน — จางกว่าเพื่อให้ชื่อวันยังเด่นกว่า */
+.quick-chip-sub {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-faint);
+}
+
+.quick-chip:hover .quick-chip-sub { color: inherit; }
+.quick-chip.is-on .quick-chip-sub { color: rgba(255, 255, 255, 0.8); }
+
+/* ---------- ส่วนของฟอร์มที่พับเก็บได้ ---------- */
+/* ห้ามใส่ overflow: hidden ตรงนี้ — ปฏิทินกับ dropdown ข้างในเป็น
+   position: absolute จะถูกตัดหายไปทั้งหมด (ใช้ border-radius ที่หัวข้อ
+   แทนเพื่อไม่ให้สีตอน hover ล้นมุมโค้ง) */
+.form-section {
+  border: 1.5px solid var(--border-muted);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.form-section.is-open { border-color: var(--border); }
+
+.form-section-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 56px;
+  padding: 12px 14px;
+  /* โค้งตามมุมกล่องแม่ เพราะกล่องแม่ตัดเนื้อหาส่วนเกินไม่ได้แล้ว */
+  border-radius: 11px 11px 0 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+/* ตอนพับอยู่ หัวข้อคือทั้งกล่อง ต้องโค้งครบสี่มุม */
+.form-section:not(.is-open) .form-section-head { border-radius: 11px; }
+
+.form-section-head:hover { background: var(--surface-muted); }
+
+.form-section-icon { flex: none; color: var(--court); }
+
+.form-section-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  flex: none;
+}
+
+/* สรุปกินพื้นที่ที่เหลือ ยาวเกินก็ตัดด้วย ... ไม่ดันปุ่มตกบรรทัด */
+.form-section-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.85rem;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.form-section-action {
+  flex: none;
+  margin-left: auto;
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--court);
+}
+
+.form-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 14px 16px;
 }
 
 .form-grid {
@@ -1560,6 +1877,145 @@
 .owner-switch .field-label { display: block; margin-bottom: 6px; }
 .owner-switch .auth-tabs { margin-bottom: 8px; }
 .owner-switch .panel-hint { margin-bottom: 0; }
+
+/* แท็บนำทางระดับหน้า — ทรงกล่องแบ่งช่อง ติดขอบบนตอนเลื่อน (ใช้ทุกหน้าที่มีแท็บ) */
+.tab-bar {
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  /* เว้นบนให้หลุดจากกล่องหัวเรื่องด้านบน ไม่ติดกันจนดูเป็นก้อนเดียว
+     (ในหน้าที่แท็บอยู่ในกล่องเดียวกับหัวเรื่อง margin จะยุบรวมกับ
+      margin-bottom ของ .page-head เอง ไม่บวกซ้อนกัน) */
+  margin: 24px 0 20px;
+  border: 1px solid var(--border-muted);
+  border-radius: 12px;
+  /* sticky ต้องมีพื้นหลังทึบ ไม่งั้นเนื้อหาจะไหลทะลุขึ้นมาซ้อน */
+  background: var(--surface-muted);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tab-bar::-webkit-scrollbar { display: none; }
+
+.tab-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  /* แบ่งช่องเท่ากัน แต่ไม่ยอมบีบจนตัวหนังสือตก — ถ้าไม่พอให้เลื่อนแนวนอนแทน */
+  flex: 1 1 0;
+  min-width: max-content;
+  /* สูงอย่างน้อย 48px — ใช้นิ้วโป้งกดตอนยืนอยู่ริมคอร์ต ไม่ได้ใช้เมาส์ */
+  min-height: 48px;
+  padding: 12px 18px;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.tab-btn:hover:not(.is-active) { color: var(--text); }
+
+.tab-btn.is-active {
+  background: var(--surface);
+  color: var(--court);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* แท็บย่อย — ทรงแคปซูลกลมและกว้างเท่าเนื้อหา ต่างจากแท็บใหญ่ที่เป็นกล่อง
+   เหลี่ยมและแบ่งช่องเต็มความกว้าง จะได้เห็นว่าอยู่คนละระดับ */
+.subtab-bar {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border-muted);
+  border-radius: 999px;
+  background: var(--surface-muted);
+}
+
+.subtab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 7px 16px;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.87rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.subtab:hover:not(.is-active) { color: var(--text); }
+
+.subtab.is-active {
+  background: var(--surface);
+  color: var(--court);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.subtab.is-active .tab-count { background: var(--court); color: #fff; }
+
+.subtab-bar { margin-bottom: 18px; }
+
+.tab-count {
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+}
+
+.tab-btn.is-active .tab-count { background: var(--court); color: #fff; }
+
+/* แถบคนที่ติดพัก โผล่ในแท็บคอร์ต */
+.resting-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1.5px solid var(--skill2-bg);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--skill2-bg) 40%, transparent);
+}
+
+.resting-strip-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--skill2-text);
+}
+
+.resting-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.88rem;
+  font-weight: 500;
+}
+
+.resting-chip:hover:not(:disabled) { border-color: var(--court); color: var(--court); }
+.resting-chip:disabled { opacity: 0.7; cursor: default; }
+
+.resting-strip-hint {
+  font-size: 0.78rem;
+  color: var(--text-faint);
+}
 
 /* tabs: เข้าสู่ระบบ / สมัครสมาชิก */
 .auth-tabs {

@@ -6,6 +6,8 @@ import { pairKey, pickNextMatch } from '../utils/pairing'
 function mapPlayer(row) {
   return {
     id: row.id,
+    // ใช้กรองรายชื่อ master ที่ลงชื่อไปแล้ว ไม่ให้เลือกซ้ำ (null = แขกขาจร)
+    memberId: row.member_id,
     name: row.name,
     skill: row.skill,
     status: row.status,
@@ -197,16 +199,29 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
    * (เช่น "ต้องกดเริ่มวันเล่นก่อนถึงจะจัดคนลงคอร์ตได้") ถ้าปล่อยให้ลง
    * console อย่างเดียว ผู้ใช้จะเห็นแค่ "กดแล้วไม่มีอะไรเกิดขึ้น"
    */
-  const run = useCallback(async (query) => {
-    const { error } = await query
-    if (error) {
-      console.error(error)
-      setActionError(error.message || 'ทำรายการไม่สำเร็จ ลองใหม่อีกครั้ง')
-      return false
-    }
-    setActionError('')
-    return true
-  }, [])
+  const run = useCallback(
+    async (query) => {
+      const { error } = await query
+      if (error) {
+        console.error(error)
+        setActionError(error.message || 'ทำรายการไม่สำเร็จ ลองใหม่อีกครั้ง')
+        return false
+      }
+      setActionError('')
+
+      // โหลดใหม่เองหลังเขียนสำเร็จ ไม่รอ realtime
+      //
+      // realtime ที่ subscribe แบบมี filter (session_id=eq.…) ส่ง event ลบไม่ถึง
+      // เพราะ payload ของ DELETE มีแค่คีย์หลัก ไม่มี session_id ให้ filter จับ
+      // กดลบแล้วหน้าจอเลยนิ่งจนกว่าจะ F5
+      //
+      // และถึง realtime จะทำงานครบ การกระทำของตัวเองก็ควรเห็นผลทันที
+      // ไม่ใช่รอ event เดินทางกลับมา — realtime มีไว้ให้ "เครื่องอื่น" รู้
+      await refetchAll()
+      return true
+    },
+    [refetchAll],
+  )
 
   const clearActionError = useCallback(() => setActionError(''), [])
 

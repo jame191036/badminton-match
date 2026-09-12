@@ -26,6 +26,13 @@ export default function MatchHistory({ history }) {
         </p>
       )}
 
+      <div className="history-item history-head" aria-hidden="true">
+        <span className="history-time">เวลา</span>
+        <span className="history-court">คอร์ต</span>
+        <span className="history-teams">ผู้เล่น</span>
+        <span className="history-duration">ใช้เวลา</span>
+      </div>
+
       <ul className="history-list">
         {history.map((h) => (
           <li key={h.id} className="history-item">

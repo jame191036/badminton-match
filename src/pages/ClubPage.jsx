@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useClubDays } from '../hooks/useClubDays'
-import NewPlayDayForm from '../components/NewPlayDayForm'
 import ClubSharePanel from '../components/ClubSharePanel'
 import ClubSettingsPanel from '../components/ClubSettingsPanel'
 import { SkeletonHead, SkeletonList } from '../components/Skeleton'
@@ -40,8 +39,6 @@ export default function ClubPage() {
     days,
     loading,
     error,
-    loadDefaults,
-    createDay,
     startDay,
     cancelDay,
     renameClub,
@@ -51,7 +48,7 @@ export default function ClubPage() {
   // (เทียบเป็นสตริง YYYY-MM-DD กับ play_date ซึ่งเป็น date ไม่มีเวลา)
   const [today] = useState(todayISO)
   const [tab, setTab] = useState('days')
-  const [showForm, setShowForm] = useState(false)
+  const [dayTab, setDayTab] = useState('upcoming')
   const [actionError, setActionError] = useState('')
 
   const canEdit = club?.role === 'owner' || club?.role === 'editor'
@@ -73,12 +70,6 @@ export default function ClubPage() {
   const past = days
     .filter((d) => d.status === 'done' || d.status === 'cancelled')
     .sort(byDateDesc)
-
-  async function handleCreate(payload) {
-    const sessionId = await createDay(payload)
-    setShowForm(false)
-    navigate(`/club/${clubId}/day/${sessionId}`)
-  }
 
   async function run(fn) {
     setActionError('')
@@ -113,44 +104,45 @@ export default function ClubPage() {
   return (
     <>
       <section className="panel">
+        {/* ลิงก์ย้อนกลับอยู่นอก .page-head เพื่อให้ปุ่มด้านขวาเทียบระดับกับ
+            ชื่อก๊วน ไม่ใช่เทียบกับบรรทัดแรกสุดของกล่อง */}
+        <Link to="/" className="back-link">
+          ก๊วนทั้งหมด
+        </Link>
+
         <div className="page-head">
           <div>
-            <Link to="/" className="back-link">
-              ← ก๊วนทั้งหมด
-            </Link>
             <h2>{club.name}</h2>
             {club.note && <p className="panel-lead">{club.note}</p>}
           </div>
+
+          {/* อยู่นอกแท็บ เห็นได้ทุกแท็บ ไม่ต้องกลับมาแท็บวันเล่นก่อนถึงจะสร้างได้ */}
+          {canEdit && (
+            <div className="page-head-actions">
+              <Link to={`/club/${clubId}/new`} className="btn-primary btn-link">
+                + สร้างวันเล่น
+              </Link>
+            </div>
+          )}
         </div>
 
-        <div className="auth-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === 'days'}
-            className={`auth-tab${tab === 'days' ? ' is-active' : ''}`}
-            onClick={() => setTab('days')}
-          >
-            วันเล่น
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === 'share'}
-            className={`auth-tab${tab === 'share' ? ' is-active' : ''}`}
-            onClick={() => setTab('share')}
-          >
-            คนในก๊วน
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === 'settings'}
-            className={`auth-tab${tab === 'settings' ? ' is-active' : ''}`}
-            onClick={() => setTab('settings')}
-          >
-            ตั้งค่า
-          </button>
+        <div className="tab-bar" role="tablist">
+          {[
+            { id: 'days', label: 'วันเล่น' },
+            { id: 'share', label: 'คนในก๊วน' },
+            { id: 'settings', label: 'ตั้งค่า' },
+          ].map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === t.id}
+              className={`tab-btn${tab === t.id ? ' is-active' : ''}`}
+              onClick={() => setTab(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
 
         {actionError && <p className="auth-error">{actionError}</p>}
@@ -172,69 +164,79 @@ export default function ClubPage() {
           />
         ) : (
           <>
-            {canEdit &&
-              (showForm ? (
-                <NewPlayDayForm
-                  ownerId={club.ownerId}
-                  loadDefaults={loadDefaults}
-                  onSubmit={handleCreate}
-                  onCancel={() => setShowForm(false)}
-                />
-              ) : (
-                <button className="btn-primary" type="button" onClick={() => setShowForm(true)}>
-                  + สร้างวันเล่น
+            {/* แท็บย่อยใช้ทรงแคปซูล ต่างจากแท็บใหญ่ที่เป็นขีดเส้นใต้
+                จะได้เห็นว่าอยู่คนละระดับกัน ไม่สับสนว่าเป็นแท็บชุดเดียวกัน */}
+            <div className="subtab-bar" role="tablist">
+              {[
+                { id: 'upcoming', label: 'ที่จะเล่น', count: overdue.length + upcoming.length },
+                { id: 'past', label: 'ที่เล่นไปแล้ว', count: past.length },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={dayTab === t.id}
+                  className={`subtab${dayTab === t.id ? ' is-active' : ''}`}
+                  onClick={() => setDayTab(t.id)}
+                >
+                  {t.label}
+                  {t.count > 0 && <span className="tab-count mono">{t.count}</span>}
                 </button>
               ))}
+            </div>
 
-            {overdue.length > 0 && (
-              <>
-                <h3 className="section-head">เลยกำหนดแล้ว</h3>
-                <p className="panel-hint">
-                  จองไว้แต่ยังไม่ได้กดเริ่ม — ถ้าไปเล่นแล้วกดเริ่มได้เลย ถ้าไม่ได้ไปก็กดยกเลิก
-                </p>
+            {dayTab === 'past' ? (
+              past.length === 0 ? (
+                <p className="empty-text">ยังไม่มีประวัติ — วันที่จบแล้วจะมาโผล่ที่นี่</p>
+              ) : (
                 <ul className="day-list">
-                  {overdue.map((day) => (
-                    <DayRow
-                      key={day.id}
-                      day={day}
-                      clubId={clubId}
-                      canEdit={canEdit}
-                      overdue
-                      onStart={() => run(() => startDay(day.id))}
-                      onCancel={() => run(() => cancelDay(day.id))}
-                    />
+                  {past.map((day) => (
+                    <DayRow key={day.id} day={day} clubId={clubId} canEdit={false} />
                   ))}
                 </ul>
+              )
+            ) : (
+              <>
+                {overdue.length > 0 && (
+                  <>
+                    <h3 className="section-head">เลยกำหนดแล้ว</h3>
+                    <p className="panel-hint">
+                      จองไว้แต่ยังไม่ได้กดเริ่ม — ถ้าไปเล่นแล้วกดเริ่มได้เลย ถ้าไม่ได้ไปก็กดยกเลิก
+                    </p>
+                    <ul className="day-list">
+                      {overdue.map((day) => (
+                        <DayRow
+                          key={day.id}
+                          day={day}
+                          clubId={clubId}
+                          canEdit={canEdit}
+                          overdue
+                          onStart={() => run(() => startDay(day.id))}
+                          onCancel={() => run(() => cancelDay(day.id))}
+                        />
+                      ))}
+                    </ul>
+                    <h3 className="section-head">นัดที่จะถึง</h3>
+                  </>
+                )}
+
+                {upcoming.length === 0 ? (
+                  <p className="empty-text">ยังไม่มีนัด — สร้างวันเล่นไว้ล่วงหน้าได้</p>
+                ) : (
+                  <ul className="day-list">
+                    {upcoming.map((day) => (
+                      <DayRow
+                        key={day.id}
+                        day={day}
+                        clubId={clubId}
+                        canEdit={canEdit}
+                        onStart={() => run(() => startDay(day.id))}
+                        onCancel={() => run(() => cancelDay(day.id))}
+                      />
+                    ))}
+                  </ul>
+                )}
               </>
-            )}
-
-            <h3 className="section-head">ที่จะเล่น</h3>
-            {upcoming.length === 0 ? (
-              <p className="empty-text">ยังไม่มีนัด — สร้างวันเล่นไว้ล่วงหน้าได้</p>
-            ) : (
-              <ul className="day-list">
-                {upcoming.map((day) => (
-                  <DayRow
-                    key={day.id}
-                    day={day}
-                    clubId={clubId}
-                    canEdit={canEdit}
-                    onStart={() => run(() => startDay(day.id))}
-                    onCancel={() => run(() => cancelDay(day.id))}
-                  />
-                ))}
-              </ul>
-            )}
-
-            <h3 className="section-head">ที่เล่นไปแล้ว</h3>
-            {past.length === 0 ? (
-              <p className="empty-text">ยังไม่มีประวัติ</p>
-            ) : (
-              <ul className="day-list">
-                {past.map((day) => (
-                  <DayRow key={day.id} day={day} clubId={clubId} canEdit={false} />
-                ))}
-              </ul>
             )}
           </>
         )}

@@ -8,6 +8,7 @@ import { ConfirmProvider } from './components/ConfirmProvider'
 import ClubListPage from './pages/ClubListPage'
 import MasterDataPage from './pages/MasterDataPage'
 import ClubPage from './pages/ClubPage'
+import NewPlayDayPage from './pages/NewPlayDayPage'
 import PlayDayPage from './pages/PlayDayPage'
 import './app.css'
 
@@ -67,6 +68,7 @@ export default function App() {
           <Route index element={<ClubListPage />} />
           <Route path="master" element={<MasterDataPage />} />
           <Route path="club/:clubId" element={<ClubPage />} />
+          <Route path="club/:clubId/new" element={<NewPlayDayPage />} />
           <Route path="club/:clubId/day/:sessionId" element={<PlayDayPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

@@ -68,6 +68,16 @@ export default function SessionStats({ players, summary }) {
         </p>
       )}
 
+      {/* หัวตาราง: ใช้คลาสเดียวกับแถวข้อมูล ความกว้างคอลัมน์จะได้ตรงกันเป๊ะ
+          โดยไม่ต้องนิยามความกว้างซ้ำสองที่ */}
+      <div className="stats-item stats-head" aria-hidden="true">
+        <span className="stats-name">ชื่อ</span>
+        <span className="stats-skill">ระดับมือ</span>
+        <span className="stats-status">สถานะ</span>
+        <span className="stats-games">เล่นแล้ว</span>
+        <span className="stats-minutes">เวลา</span>
+      </div>
+
       <ul className="stats-list">
         {ranked.map((p) => (
           <li key={p.id} className="stats-item">

@@ -86,14 +86,14 @@ export default function MasterDataPage() {
           </div>
         )}
 
-        <div className="auth-tabs" role="tablist">
+        <div className="tab-bar" role="tablist">
           {TABS.map((t) => (
             <button
               key={t.id}
               type="button"
               role="tab"
               aria-selected={tab === t.id}
-              className={`auth-tab${tab === t.id ? ' is-active' : ''}`}
+              className={`tab-btn${tab === t.id ? ' is-active' : ''}`}
               onClick={() => setTab(t.id)}
             >
               {t.label}
