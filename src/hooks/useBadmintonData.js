@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { pairKey, pickNextMatch } from '../utils/pairing'
 
@@ -23,6 +23,18 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
   // Map: pairKey(a,b) -> { together, against } ใช้โดยโหมดคิว 'rotate'
   const [pairStats, setPairStats] = useState(() => new Map())
   const [loading, setLoading] = useState(true)
+  // ข้อความ error ของคำสั่งล่าสุด (ส่วนใหญ่มาจาก RPC เป็นภาษาไทยอยู่แล้ว)
+  const [actionError, setActionError] = useState('')
+
+  // refetchAll ถูกเรียกจาก realtime callback ด้วย ซึ่งอาจมาถึงหลัง unmount
+  // (ตั้ง true ตอน mount ไม่ใช่ตอนประกาศ เพราะ StrictMode จะ mount ซ้ำรอบสอง)
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   const refetchAll = useCallback(async () => {
     if (!sessionId) return
@@ -48,6 +60,8 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
       supabase.from('v_session_summary').select('*').eq('session_id', sessionId).single(),
       supabase.from('v_pair_history').select('*').eq('session_id', sessionId),
     ])
+
+    if (!mountedRef.current) return
 
     setPairStats(
       new Map(
@@ -128,7 +142,10 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
   }, [sessionId])
 
   useEffect(() => {
-    refetchAll()
+    async function load() {
+      await refetchAll()
+    }
+    load()
   }, [refetchAll])
 
   // realtime: มีอะไรเปลี่ยนในตารางที่เกี่ยวข้อง -> refetch ทั้งชุดใหม่
@@ -162,85 +179,126 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
 
   // ---------- actions ----------
 
+  /**
+   * ห่อทุกคำสั่งที่เขียน DB ไว้ที่เดียว เพื่อเก็บ error มาโชว์บนจอ
+   *
+   * RPC ฝั่ง DB raise ข้อความไทยที่อธิบายสาเหตุมาให้อยู่แล้ว
+   * (เช่น "ต้องกดเริ่มวันเล่นก่อนถึงจะจัดคนลงคอร์ตได้") ถ้าปล่อยให้ลง
+   * console อย่างเดียว ผู้ใช้จะเห็นแค่ "กดแล้วไม่มีอะไรเกิดขึ้น"
+   */
+  const run = useCallback(async (query) => {
+    const { error } = await query
+    if (error) {
+      console.error(error)
+      setActionError(error.message || 'ทำรายการไม่สำเร็จ ลองใหม่อีกครั้ง')
+      return false
+    }
+    setActionError('')
+    return true
+  }, [])
+
+  const clearActionError = useCallback(() => setActionError(''), [])
+
   // ผ่าน RPC เพราะต้องสร้าง/อัปเดตแถวใน members ไปพร้อมกันใน transaction เดียว
   // (รายชื่อสมาชิกจึงสะสมขึ้นมาเองโดยไม่ต้องมีหน้าจัดการแยก)
   const addPlayer = useCallback(
     async (name, skill) => {
       if (!sessionId) return
-      const { error } = await supabase.rpc('add_player', {
-        p_session_id: sessionId,
-        p_name: name,
-        p_skill: skill,
-      })
-      if (error) console.error(error)
+      await run(
+        supabase.rpc('add_player', {
+          p_session_id: sessionId,
+          p_name: name,
+          p_skill: skill,
+        }),
+      )
     },
-    [sessionId]
+    [sessionId, run]
   )
 
-  const removePlayer = useCallback(async (id) => {
-    const { error } = await supabase.from('players').delete().eq('id', id)
-    if (error) console.error(error)
-  }, [])
+  const removePlayer = useCallback(
+    async (id) => {
+      await run(supabase.from('players').delete().eq('id', id))
+    },
+    [run]
+  )
 
   const togglePaying = useCallback(
     async (id) => {
       const player = players.find((p) => p.id === id)
       if (!player) return
-      const { error } = await supabase.from('players').update({ paying: !player.paying }).eq('id', id)
-      if (error) console.error(error)
+      await run(supabase.from('players').update({ paying: !player.paying }).eq('id', id))
     },
-    [players]
+    [players, run]
   )
 
   const toggleRest = useCallback(
     async (id) => {
       const player = players.find((p) => p.id === id)
       if (!player) return
-      if (player.status === 'resting') {
-        const { error } = await supabase.rpc('resume_player_queue', { p_player_id: id })
-        if (error) console.error(error)
-      } else {
-        const { error } = await supabase.from('players').update({ status: 'resting' }).eq('id', id)
-        if (error) console.error(error)
-      }
+      await run(
+        player.status === 'resting'
+          ? supabase.rpc('resume_player_queue', { p_player_id: id })
+          : supabase.from('players').update({ status: 'resting' }).eq('id', id),
+      )
     },
-    [players]
+    [players, run]
+  )
+
+  // เช็คชื่อหน้างาน: absent = ลงชื่อไว้แต่ไม่มา ไม่เข้าคิว และไม่ถูกนับเป็นตัวหารค่าใช้จ่าย
+  const setAttendance = useCallback(
+    async (playerId, present) => {
+      await run(
+        supabase.rpc('set_player_attendance', {
+          p_player_id: playerId,
+          p_present: present,
+        }),
+      )
+    },
+    [run]
   )
 
   const addCourt = useCallback(async () => {
     if (!sessionId) return
-    const { error } = await supabase
-      .from('courts')
-      .insert({ session_id: sessionId, name: `คอร์ต ${courts.length + 1}`, sort_order: courts.length })
-    if (error) console.error(error)
-  }, [sessionId, courts.length])
+    await run(
+      supabase.from('courts').insert({
+        session_id: sessionId,
+        name: `คอร์ต ${courts.length + 1}`,
+        sort_order: courts.length,
+      }),
+    )
+  }, [sessionId, courts.length, run])
 
   // ชั่วโมงที่จองของแต่ละคอร์ต — ใช้คิดค่าสนาม (ดู BillingPanel)
-  const updateCourtHours = useCallback(async (courtId, hours) => {
-    const { error } = await supabase.from('courts').update({ hours }).eq('id', courtId)
-    if (error) console.error(error)
-  }, [])
+  const updateCourtHours = useCallback(
+    async (courtId, hours) => {
+      await run(supabase.from('courts').update({ hours }).eq('id', courtId))
+    },
+    [run]
+  )
 
   const removeCourt = useCallback(async () => {
     const last = courts[courts.length - 1]
     if (!last) return
-    const { error } = await supabase.rpc('remove_court', { p_court_id: last.id })
-    if (error) console.error(error)
-  }, [courts])
+    await run(supabase.rpc('remove_court', { p_court_id: last.id }))
+  }, [courts, run])
 
   const assignCourt = useCallback(
     async (courtId) => {
       const waiting = players.filter((p) => p.status === 'waiting')
       const match = pickNextMatch(waiting, { mode: queueMode, pairStats })
-      if (!match) return
-      const { error } = await supabase.rpc('assign_court', {
-        p_court_id: courtId,
-        p_team_a: match.teamA.map((p) => p.id),
-        p_team_b: match.teamB.map((p) => p.id),
-      })
-      if (error) console.error(error)
+      if (!match) {
+        setActionError('คนรอคิวไม่ครบ 4 คน')
+        return
+      }
+      await run(
+        supabase.rpc('assign_court', {
+          p_court_id: courtId,
+          p_team_a: match.teamA.map((p) => p.id),
+          p_team_b: match.teamB.map((p) => p.id),
+        }),
+      )
     },
-    [players, queueMode, pairStats]
+    [players, queueMode, pairStats, run]
   )
 
   // pending -> playing (เริ่มจับเวลา)
@@ -248,10 +306,9 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
     async (courtId) => {
       const court = courts.find((c) => c.id === courtId)
       if (!court?.match) return
-      const { error } = await supabase.rpc('start_match', { p_match_id: court.match.id })
-      if (error) console.error(error)
+      await run(supabase.rpc('start_match', { p_match_id: court.match.id }))
     },
-    [courts]
+    [courts, run]
   )
 
   // เอาคนที่ยังไม่พร้อมออกไปพัก แล้วดึงคนแรกในคิวมาแทน (ทำได้เฉพาะตอน pending)
@@ -259,33 +316,32 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
     async (courtId, playerId) => {
       const court = courts.find((c) => c.id === courtId)
       if (!court?.match) return
-      const { error } = await supabase.rpc('substitute_player', {
-        p_match_id: court.match.id,
-        p_player_id: playerId,
-      })
-      if (error) console.error(error)
+      await run(
+        supabase.rpc('substitute_player', {
+          p_match_id: court.match.id,
+          p_player_id: playerId,
+        }),
+      )
     },
-    [courts]
+    [courts, run]
   )
 
   const cancelMatch = useCallback(
     async (courtId) => {
       const court = courts.find((c) => c.id === courtId)
       if (!court?.match) return
-      const { error } = await supabase.rpc('cancel_match', { p_match_id: court.match.id })
-      if (error) console.error(error)
+      await run(supabase.rpc('cancel_match', { p_match_id: court.match.id }))
     },
-    [courts]
+    [courts, run]
   )
 
   const finishMatch = useCallback(
     async (courtId) => {
       const court = courts.find((c) => c.id === courtId)
       if (!court?.match) return
-      const { error } = await supabase.rpc('finish_match', { p_match_id: court.match.id })
-      if (error) console.error(error)
+      await run(supabase.rpc('finish_match', { p_match_id: court.match.id }))
     },
-    [courts]
+    [courts, run]
   )
 
   return {
@@ -294,10 +350,13 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
     history,
     summary,
     loading,
+    actionError,
+    clearActionError,
     addPlayer,
     removePlayer,
     togglePaying,
     toggleRest,
+    setAttendance,
     addCourt,
     removeCourt,
     updateCourtHours,

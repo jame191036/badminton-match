@@ -1,18 +1,49 @@
 import { useState } from 'react'
+import ThemeToggle from './ThemeToggle'
+import PasswordField from './PasswordField'
 
-export default function Login({ onSignIn }) {
+const TABS = [
+  { id: 'signin', label: 'เข้าสู่ระบบ' },
+  { id: 'signup', label: 'สมัครสมาชิก' },
+]
+
+export default function Login({ onSignIn, onSignUp, onForgotPassword, theme, onToggleTheme }) {
+  const [mode, setMode] = useState('signin')
   const [email, setEmail] = useState('')
-  const [sent, setSent] = useState(false)
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  // อีเมลที่ส่งลิงก์ไปแล้ว: { kind: 'verify' | 'reset', email }
+  const [sent, setSent] = useState(null)
+
+  function switchMode(next) {
+    setMode(next)
+    setError('')
+    setPassword('')
+    setConfirm('')
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
+
+    if (mode === 'signup' && password !== confirm) {
+      setError('รหัสผ่านทั้งสองช่องไม่ตรงกัน')
+      return
+    }
+
     setLoading(true)
     try {
-      await onSignIn(email)
-      setSent(true)
+      if (mode === 'signin') {
+        await onSignIn(email, password)
+      } else if (mode === 'signup') {
+        const signedIn = await onSignUp(email, password)
+        if (!signedIn) setSent({ kind: 'verify', email })
+      } else {
+        await onForgotPassword(email)
+        setSent({ kind: 'reset', email })
+      }
     } catch (err) {
       setError(err.message)
     } finally {
@@ -20,32 +51,145 @@ export default function Login({ onSignIn }) {
     }
   }
 
+  const isForgot = mode === 'forgot'
+  const isSignup = mode === 'signup'
+
   return (
-    <div className="app-shell">
-      <div className="panel" style={{ marginTop: 60, maxWidth: 380, marginInline: 'auto' }}>
-        {sent ? (
-          <>
-            <h2>เช็คอีเมลของคุณ</h2>
-            <p>เราส่งลิงก์เข้าสู่ระบบไปที่ {email} แล้ว กดลิงก์ในอีเมลเพื่อเข้าใช้งาน</p>
-          </>
-        ) : (
-          <>
-            <h2>เข้าสู่ระบบ</h2>
-            <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
-              <input
-                type="email"
-                required
-                placeholder="อีเมลของคุณ"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-              <button className="btn-primary" type="submit" disabled={loading}>
-                {loading ? 'กำลังส่งลิงก์...' : 'ส่งลิงก์เข้าสู่ระบบ'}
-              </button>
-              {error && <p style={{ color: 'var(--coral)' }}>{error}</p>}
-            </form>
-          </>
-        )}
+    <div className="auth-screen">
+      <div className="auth-toggle">
+        <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+      </div>
+
+      <div className="auth-card">
+        <div className="auth-brand">
+          <span className="auth-shuttle" aria-hidden="true">🏸</span>
+          <span className="eyebrow mono">จัดก๊วนแบด</span>
+          <h1 className="display">จับคู่ลงคอร์ต</h1>
+          <p className="auth-tagline">
+            เพิ่มผู้เล่น ระบบจัดคิวและจับคู่ดับเบิลให้อัตโนมัติ วนเวียนอย่างเป็นธรรม
+          </p>
+        </div>
+
+        <div className="auth-body">
+          {sent ? (
+            <div className="auth-sent">
+              <div className="auth-sent-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2.5" y="4.5" width="19" height="15" rx="2.5" />
+                  <path d="m3.5 6.5 8.5 6 8.5-6" />
+                </svg>
+              </div>
+              <h2>{sent.kind === 'verify' ? 'ยืนยันอีเมลของคุณ' : 'ส่งลิงก์ตั้งรหัสผ่านแล้ว'}</h2>
+              <p className="auth-sent-text">
+                {sent.kind === 'verify' ? 'เราส่งลิงก์ยืนยันไปที่' : 'เราส่งลิงก์ตั้งรหัสผ่านใหม่ไปที่'}
+                <strong className="auth-email">{sent.email}</strong>
+                กดลิงก์ในอีเมลเพื่อ{sent.kind === 'verify' ? 'เปิดใช้งานบัญชี' : 'ตั้งรหัสผ่านใหม่'}
+              </p>
+              <p className="auth-hint">ไม่เจอในกล่องขาเข้า? ลองดูในโฟลเดอร์จดหมายขยะ</p>
+              <div className="auth-sent-actions">
+                <button
+                  className="btn-ghost"
+                  type="button"
+                  onClick={() => {
+                    setSent(null)
+                    switchMode('signin')
+                  }}
+                >
+                  กลับไปหน้าเข้าสู่ระบบ
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {isForgot ? (
+                <>
+                  <h2>ลืมรหัสผ่าน</h2>
+                  <p className="auth-lead">กรอกอีเมลที่ใช้สมัคร เราจะส่งลิงก์ให้ตั้งรหัสผ่านใหม่</p>
+                </>
+              ) : (
+                <div className="auth-tabs" role="tablist">
+                  {TABS.map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={mode === tab.id}
+                      className={`auth-tab${mode === tab.id ? ' is-active' : ''}`}
+                      onClick={() => switchMode(tab.id)}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <form className="auth-form" onSubmit={handleSubmit}>
+                <label className="auth-field">
+                  <span className="auth-label">อีเมล</span>
+                  <span className="auth-input-wrap">
+                    <svg className="auth-input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <rect x="2.5" y="4.5" width="19" height="15" rx="2.5" />
+                      <path d="m3.5 6.5 8.5 6 8.5-6" />
+                    </svg>
+                    <input
+                      type="email"
+                      required
+                      autoComplete="email"
+                      placeholder="you@example.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                    />
+                  </span>
+                </label>
+
+                {!isForgot && (
+                  <PasswordField
+                    label="รหัสผ่าน"
+                    value={password}
+                    onChange={setPassword}
+                    autoComplete={isSignup ? 'new-password' : 'current-password'}
+                    minLength={isSignup ? 6 : undefined}
+                    hint={isSignup ? 'อย่างน้อย 6 ตัวอักษร' : undefined}
+                  />
+                )}
+
+                {isSignup && (
+                  <PasswordField
+                    label="ยืนยันรหัสผ่าน"
+                    value={confirm}
+                    onChange={setConfirm}
+                    autoComplete="new-password"
+                  />
+                )}
+
+                {mode === 'signin' && (
+                  <button type="button" className="auth-link" onClick={() => switchMode('forgot')}>
+                    ลืมรหัสผ่าน?
+                  </button>
+                )}
+
+                {error && <p className="auth-error">{error}</p>}
+
+                <button className="btn-primary auth-submit" type="submit" disabled={loading}>
+                  {loading && <span className="auth-spinner" aria-hidden="true" />}
+                  {loading
+                    ? 'กำลังดำเนินการ...'
+                    : isForgot
+                      ? 'ส่งลิงก์ตั้งรหัสผ่าน'
+                      : isSignup
+                        ? 'สมัครสมาชิก'
+                        : 'เข้าสู่ระบบ'}
+                </button>
+              </form>
+
+              {isForgot && (
+                <button type="button" className="auth-link auth-link-center" onClick={() => switchMode('signin')}>
+                  กลับไปหน้าเข้าสู่ระบบ
+                </button>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   )

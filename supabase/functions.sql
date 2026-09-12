@@ -1,18 +1,218 @@
 -- ============================================================
 -- RPC Functions — เรียกจาก client ผ่าน supabase.rpc('...')
 -- รวม logic ที่แตะหลายตารางไว้เป็น transaction เดียวต่อครั้ง
--- (ทุกฟังก์ชันเป็น SECURITY DEFINER ซึ่งข้าม RLS ไปเอง
---  จึงต้องเช็ค ownership ด้วยมือในทุกฟังก์ชัน)
+--
+-- *** ทุกฟังก์ชันเป็น SECURITY DEFINER ซึ่งข้าม RLS ไปเอง ***
+-- จึงต้องเช็คสิทธิ์ด้วยมือทุกตัว ผ่าน can_edit_club / can_edit_session
+-- และต้อง grant execute ให้ authenticated ท้ายไฟล์
+-- ============================================================
+
+
+-- ============================================================
+-- ก๊วน (master)
 -- ============================================================
 
 -- ------------------------------------------------------------
--- เพิ่มผู้เล่นเข้าก๊วน — สร้าง/อัปเดตสมาชิกให้อัตโนมัติไปในตัว
--- ทำให้รายชื่อสมาชิกสะสมขึ้นมาเองโดยไม่ต้องมีหน้าจัดการแยก
+-- สร้างก๊วน + ใส่สิทธิ์ owner ให้ตัวเอง (2 ตาราง จึงต้องเป็น RPC)
 -- ------------------------------------------------------------
-create or replace function add_player(
-  p_session_id uuid,
-  p_name text,
-  p_skill smallint
+create or replace function create_club(p_name text, p_note text default null)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_club_id uuid;
+  v_name text := trim(coalesce(p_name, ''));
+begin
+  if auth.uid() is null then
+    raise exception 'ต้องเข้าสู่ระบบก่อน';
+  end if;
+
+  if char_length(v_name) = 0 then
+    raise exception 'ต้องใส่ชื่อก๊วน';
+  end if;
+
+  insert into clubs (owner_id, name, note)
+  values (auth.uid(), v_name, nullif(trim(coalesce(p_note, '')), ''))
+  returning id into v_club_id;
+
+  insert into club_access (club_id, user_id, role)
+  values (v_club_id, auth.uid(), 'owner');
+
+  return v_club_id;
+end;
+$$;
+
+-- ------------------------------------------------------------
+-- แชร์ก๊วนให้คนอื่นด้วยอีเมล — คนนั้นต้องมีบัญชีในระบบแล้ว
+-- (ระบบเชิญคนที่ยังไม่เคยสมัครยังไม่ทำในรอบนี้)
+-- ------------------------------------------------------------
+create or replace function grant_club_access(
+  p_club_id uuid,
+  p_email text,
+  p_role text default 'viewer'
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid;
+  v_email text := lower(trim(coalesce(p_email, '')));
+begin
+  if not is_club_owner(p_club_id) then
+    raise exception 'เฉพาะเจ้าของก๊วนเท่านั้นที่แชร์ก๊วนได้';
+  end if;
+
+  if p_role not in ('editor', 'viewer') then
+    raise exception 'บทบาทต้องเป็น editor หรือ viewer เท่านั้น';
+  end if;
+
+  select id into v_user_id from auth.users where lower(email) = v_email;
+
+  if v_user_id is null then
+    raise exception 'ยังไม่มีบัญชีของอีเมลนี้ ให้เขาสมัครเข้าใช้งานก่อน';
+  end if;
+
+  if v_user_id = auth.uid() then
+    raise exception 'คุณเป็นเจ้าของก๊วนนี้อยู่แล้ว';
+  end if;
+
+  insert into club_access (club_id, user_id, role)
+  values (p_club_id, v_user_id, p_role)
+  on conflict (club_id, user_id) do update set role = excluded.role;
+
+  return v_user_id;
+end;
+$$;
+
+create or replace function revoke_club_access(p_club_id uuid, p_user_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not is_club_owner(p_club_id) then
+    raise exception 'เฉพาะเจ้าของก๊วนเท่านั้นที่จัดการสิทธิ์ได้';
+  end if;
+
+  if p_user_id = auth.uid() then
+    raise exception 'เอาตัวเองออกจากก๊วนที่เป็นเจ้าของไม่ได้';
+  end if;
+
+  delete from club_access where club_id = p_club_id and user_id = p_user_id;
+end;
+$$;
+
+-- ------------------------------------------------------------
+-- รายชื่อคนที่เข้าถึงก๊วนนี้ได้ พร้อมอีเมล
+-- ต้องเป็น RPC ไม่ใช่ view เพราะ role authenticated อ่าน auth.users ไม่ได้
+-- ------------------------------------------------------------
+create or replace function list_club_members(p_club_id uuid)
+returns table (user_id uuid, email text, role text, created_at timestamptz)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not can_view_club(p_club_id) then
+    raise exception 'ไม่มีสิทธิ์เข้าถึงก๊วนนี้';
+  end if;
+
+  return query
+  select a.user_id, u.email::text, a.role, a.created_at
+  from club_access a
+  join auth.users u on u.id = a.user_id
+  where a.club_id = p_club_id
+  order by a.created_at;
+end;
+$$;
+
+
+-- ============================================================
+-- วันเล่น
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- ค่าตั้งต้นสำหรับฟอร์มสร้างวันเล่น เอามาจากวันล่าสุดของก๊วนนี้
+-- (สนามเดิม ราคาเดิม ยี่ห้อลูกเดิม คอร์ตเดิม รายชื่อคนเดิม)
+-- ฝั่งแอปเอาไป prefill เพื่อให้เหลือแค่กดยืนยัน
+-- ------------------------------------------------------------
+create or replace function last_day_defaults(p_club_id uuid)
+returns json
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_last sessions%rowtype;
+begin
+  if not can_view_club(p_club_id) then
+    raise exception 'ไม่มีสิทธิ์เข้าถึงก๊วนนี้';
+  end if;
+
+  select * into v_last
+  from sessions
+  where club_id = p_club_id and status in ('done', 'playing')
+  order by play_date desc, created_at desc
+  limit 1;
+
+  if v_last.id is null then
+    return json_build_object('found', false);
+  end if;
+
+  return json_build_object(
+    'found', true,
+    'session_id', v_last.id,
+    'venue_id', v_last.venue_id,
+    'shuttle_brand_id', v_last.shuttle_brand_id,
+    'shuttle_model_id', v_last.shuttle_model_id,
+    'start_time', v_last.start_time,
+    'end_time', v_last.end_time,
+    'hourly_rate', v_last.hourly_rate,
+    'shuttle_price', v_last.shuttle_price,
+    'queue_mode', v_last.queue_mode,
+    'courts', (
+      select coalesce(json_agg(json_build_object('name', c.name, 'hours', c.hours)
+                               order by c.sort_order), '[]'::json)
+      from courts c where c.session_id = v_last.id
+    ),
+    'member_ids', (
+      select coalesce(json_agg(p.member_id), '[]'::json)
+      from players p
+      where p.session_id = v_last.id and p.member_id is not null and p.status <> 'absent'
+    )
+  );
+end;
+$$;
+
+-- ------------------------------------------------------------
+-- สร้างวันเล่น พร้อมคอร์ตและรายชื่อผู้เล่น ในทรานแซกชันเดียว
+--
+-- ราคาปล่อยเป็น null ได้ = ยังไม่รู้ตอนสร้าง ค่อยมากรอกตอนจบวัน
+-- (ราคาจริงมักรู้ตอนจบ ถ้าบังคับกรอกตอนสร้างจะได้ตัวเลขมั่ว)
+--
+-- p_courts รูปแบบ: [{"name": "คอร์ต 1", "hours": 2}, ...]
+-- master ที่เลือกได้ต้องเป็นของ "เจ้าของก๊วน" เสมอ แม้คนสร้างจะเป็น editor
+-- ------------------------------------------------------------
+create or replace function create_play_day(
+  p_club_id uuid,
+  p_play_date date,
+  p_start_time time default null,
+  p_end_time time default null,
+  p_venue_id uuid default null,
+  p_shuttle_brand_id uuid default null,
+  p_shuttle_model_id uuid default null,
+  p_hourly_rate numeric default null,
+  p_shuttle_price numeric default null,
+  p_shuttle_count int default 0,
+  p_queue_mode text default 'sequential',
+  p_member_ids uuid[] default '{}',
+  p_courts jsonb default null,
+  p_note text default null
 )
 returns uuid
 language plpgsql
@@ -21,40 +221,165 @@ set search_path = public
 as $$
 declare
   v_owner_id uuid;
-  v_member_id uuid;
-  v_player_id uuid;
-  v_name text := trim(p_name);
+  v_session_id uuid;
+  v_venue_name text;
+  v_brand_name text;
+  v_model_name text;
+  v_court_count int := 0;
 begin
-  select s.owner_id into v_owner_id
-  from sessions s
-  where s.id = p_session_id and s.owner_id = auth.uid() and s.closed_at is null;
-
-  if v_owner_id is null then
-    raise exception 'session not found, access denied, or already closed';
+  if not can_edit_club(p_club_id) then
+    raise exception 'ไม่มีสิทธิ์จัดวันเล่นของก๊วนนี้';
   end if;
 
-  if char_length(v_name) = 0 then
-    raise exception 'ต้องใส่ชื่อผู้เล่น';
+  if p_play_date is null then
+    raise exception 'ต้องเลือกวันที่';
   end if;
 
-  insert into members (owner_id, name, default_skill)
-  values (v_owner_id, v_name, p_skill)
-  on conflict (owner_id, lower(trim(name)))
-    do update set default_skill = excluded.default_skill
-  returning id into v_member_id;
+  select owner_id into v_owner_id from clubs where id = p_club_id;
 
+  if p_venue_id is not null then
+    select name into v_venue_name
+    from venues where id = p_venue_id and owner_id = v_owner_id;
+    if v_venue_name is null then
+      raise exception 'ไม่พบสนามที่เลือก';
+    end if;
+  end if;
+
+  if p_shuttle_brand_id is not null then
+    select name into v_brand_name
+    from shuttle_brands where id = p_shuttle_brand_id and owner_id = v_owner_id;
+    if v_brand_name is null then
+      raise exception 'ไม่พบยี่ห้อลูกแบดที่เลือก';
+    end if;
+  end if;
+
+  -- รุ่นต้องเป็นของยี่ห้อที่เลือกจริงๆ กันส่ง id มั่วมาจากฝั่ง client
+  if p_shuttle_model_id is not null then
+    select m.name into v_model_name
+    from shuttle_models m
+    join shuttle_brands b on b.id = m.brand_id
+    where m.id = p_shuttle_model_id
+      and b.owner_id = v_owner_id
+      and m.brand_id = p_shuttle_brand_id;
+    if v_model_name is null then
+      raise exception 'รุ่นที่เลือกไม่ได้อยู่ใต้ยี่ห้อนี้';
+    end if;
+  end if;
+
+  insert into sessions (
+    club_id, venue_id, venue_name,
+    shuttle_brand_id, shuttle_model_id, shuttle_brand_name,
+    play_date, start_time, end_time, status,
+    hourly_rate, shuttle_price, shuttle_count, queue_mode, note
+  )
+  values (
+    p_club_id, p_venue_id, v_venue_name,
+    p_shuttle_brand_id, p_shuttle_model_id,
+    -- snapshot เป็นข้อความเดียว "ยี่ห้อ รุ่น" ไว้แสดงผลเผื่อ master ถูกลบ
+    nullif(trim(coalesce(v_brand_name, '') || ' ' || coalesce(v_model_name, '')), ''),
+    p_play_date, p_start_time, p_end_time, 'planned',
+    coalesce(p_hourly_rate, 0),
+    coalesce(p_shuttle_price, 0),
+    coalesce(p_shuttle_count, 0),
+    coalesce(p_queue_mode, 'sequential'),
+    nullif(trim(coalesce(p_note, '')), '')
+  )
+  returning id into v_session_id;
+
+  -- คอร์ตที่จอง
+  if p_courts is not null and jsonb_typeof(p_courts) = 'array' then
+    insert into courts (session_id, name, hours, sort_order)
+    select
+      v_session_id,
+      coalesce(nullif(trim(c.value ->> 'name'), ''), 'คอร์ต ' || (c.ordinality)::text),
+      coalesce((c.value ->> 'hours')::numeric, 0),
+      (c.ordinality - 1)::int
+    from jsonb_array_elements(p_courts) with ordinality as c(value, ordinality);
+
+    get diagnostics v_court_count = row_count;
+  end if;
+
+  -- ไม่ได้ระบุคอร์ตมาเลย ให้มีคอร์ตแรกไว้ก่อนหนึ่งคอร์ต
+  if v_court_count = 0 then
+    insert into courts (session_id, name, sort_order) values (v_session_id, 'คอร์ต 1', 0);
+  end if;
+
+  -- ผู้เล่นที่เลือกไว้ล่วงหน้า (snapshot ชื่อ/มือ ณ ตอนนี้)
   insert into players (session_id, member_id, name, skill)
-  values (p_session_id, v_member_id, v_name, p_skill)
-  returning id into v_player_id;
+  select v_session_id, m.id, m.name, m.default_skill
+  from members m
+  where m.owner_id = v_owner_id and m.id = any(p_member_ids)
+  on conflict do nothing;
 
-  return v_player_id;
+  return v_session_id;
 end;
 $$;
 
 -- ------------------------------------------------------------
--- ปิดก๊วน: freeze ยอดเงินและสถิติของครั้งนั้นไว้ถาวร
+-- เริ่มวันเล่น: planned -> playing
+-- หนึ่งก๊วนมีวันที่กำลังเล่นได้ทีละวัน (มี partial unique index กันอีกชั้น
+-- แต่เช็คเองก่อนเพื่อให้ได้ข้อความไทยแทน error ของ index)
+-- ------------------------------------------------------------
+create or replace function start_play_day(p_session_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_club_id uuid;
+  v_status text;
+begin
+  select club_id, status into v_club_id, v_status
+  from sessions where id = p_session_id;
+
+  if v_club_id is null or not can_edit_session(p_session_id) then
+    raise exception 'ไม่พบวันเล่นนี้ หรือไม่มีสิทธิ์แก้ไข';
+  end if;
+
+  if v_status = 'playing' then
+    return; -- กดซ้ำ ไม่ต้องทำอะไร
+  end if;
+
+  if v_status <> 'planned' then
+    raise exception 'วันเล่นนี้จบหรือถูกยกเลิกไปแล้ว';
+  end if;
+
+  if exists (select 1 from sessions where club_id = v_club_id and status = 'playing') then
+    raise exception 'ก๊วนนี้มีวันที่กำลังเล่นอยู่แล้ว ต้องกดจบวันนั้นก่อน';
+  end if;
+
+  update sessions set status = 'playing' where id = p_session_id;
+end;
+$$;
+
+-- ------------------------------------------------------------
+-- ยกเลิกวันที่จองไว้แต่ไม่ได้ไป (ทำได้เฉพาะตอนยัง planned)
+-- ------------------------------------------------------------
+create or replace function cancel_play_day(p_session_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not can_edit_session(p_session_id) then
+    raise exception 'ไม่พบวันเล่นนี้ หรือไม่มีสิทธิ์แก้ไข';
+  end if;
+
+  update sessions set status = 'cancelled'
+  where id = p_session_id and status = 'planned';
+
+  if not found then
+    raise exception 'ยกเลิกได้เฉพาะวันที่ยังไม่เริ่มเล่นเท่านั้น';
+  end if;
+end;
+$$;
+
+-- ------------------------------------------------------------
+-- จบการเล่นประจำวัน: freeze ยอดเงินและสถิติไว้ถาวร
 -- ถ้าปล่อยให้คำนวณสดต่อไป พอสนามขึ้นราคาแล้วแก้เรท
--- ประวัติเก่าจะเปลี่ยนยอดตามไปด้วย ทั้งที่จ่ายกันไปแล้วจริง
+-- ยอดของวันเก่าจะเปลี่ยนตาม ทั้งที่จ่ายกันไปแล้วจริง
 -- ------------------------------------------------------------
 create or replace function close_session(p_session_id uuid)
 returns void
@@ -66,25 +391,29 @@ declare
   v_bill record;
   v_sum  record;
 begin
+  if not can_edit_session(p_session_id) then
+    raise exception 'ไม่พบวันเล่นนี้ หรือไม่มีสิทธิ์แก้ไข';
+  end if;
+
   if not exists (
-    select 1 from sessions
-    where id = p_session_id and owner_id = auth.uid() and closed_at is null
+    select 1 from sessions where id = p_session_id and status = 'playing'
   ) then
-    raise exception 'session not found, access denied, or already closed';
+    raise exception 'จบได้เฉพาะวันที่กำลังเล่นอยู่เท่านั้น';
   end if;
 
   if exists (
     select 1 from matches
     where session_id = p_session_id and status in ('pending', 'playing')
   ) then
-    raise exception 'ยังมีเกมค้างอยู่ในคอร์ต ต้องจบเกมหรือยกเลิกให้หมดก่อนปิดก๊วน';
+    raise exception 'ยังมีเกมค้างอยู่ในคอร์ต ต้องจบเกมหรือยกเลิกให้หมดก่อนจบวัน';
   end if;
 
   select * into v_bill from v_billing_summary where session_id = p_session_id;
   select * into v_sum  from v_session_summary where session_id = p_session_id;
 
   update sessions
-  set closed_at           = now(),
+  set status              = 'done',
+      closed_at           = now(),
       final_total_hours   = coalesce(v_bill.total_hours, 0),
       final_court_total   = coalesce(v_bill.court_total, 0),
       final_shuttle_total = coalesce(v_bill.shuttle_total, 0),
@@ -98,13 +427,20 @@ begin
 end;
 $$;
 
+
+-- ============================================================
+-- ผู้เล่นในวันเล่น
+-- ============================================================
+
 -- ------------------------------------------------------------
--- เปิดก๊วนใหม่ พร้อมดึงสมาชิกที่เลือกเข้ามาเป็นผู้เล่นเลย
--- ค่าเรทและโหมดคิวสืบทอดจากก๊วนล่าสุด (ปกติสนามเดิมราคาเดิม)
+-- เพิ่มผู้เล่นเข้าวันเล่น — upsert เข้ารายชื่อ master ให้อัตโนมัติ
+-- ใช้ทั้งตอนเลือกล่วงหน้าและตอนมีแขกโผล่มาหน้างาน
 -- ------------------------------------------------------------
-create or replace function open_session(
-  p_name text default null,
-  p_member_ids uuid[] default '{}'
+create or replace function add_player(
+  p_session_id uuid,
+  p_name text,
+  p_skill smallint,
+  p_save_to_master boolean default true
 )
 returns uuid
 language plpgsql
@@ -112,42 +448,119 @@ security definer
 set search_path = public
 as $$
 declare
-  v_session_id uuid;
-  v_prev record;
+  v_owner_id uuid;
+  v_member_id uuid;
+  v_player_id uuid;
+  v_name text := trim(coalesce(p_name, ''));
 begin
-  if exists (
-    select 1 from sessions where owner_id = auth.uid() and closed_at is null
-  ) then
-    raise exception 'ยังมีก๊วนที่เปิดอยู่ ต้องปิดก๊วนปัจจุบันก่อน';
+  if not can_edit_session(p_session_id) then
+    raise exception 'ไม่พบวันเล่นนี้ หรือไม่มีสิทธิ์แก้ไข';
   end if;
 
-  select hourly_rate, shuttle_price, queue_mode into v_prev
-  from sessions
-  where owner_id = auth.uid()
-  order by created_at desc
-  limit 1;
+  if not exists (
+    select 1 from sessions where id = p_session_id and status in ('planned', 'playing')
+  ) then
+    raise exception 'วันเล่นนี้จบหรือถูกยกเลิกไปแล้ว';
+  end if;
 
-  insert into sessions (owner_id, name, hourly_rate, shuttle_price, queue_mode)
-  values (
-    auth.uid(),
-    coalesce(nullif(trim(p_name), ''), 'ก๊วน ' || to_char(now() at time zone 'Asia/Bangkok', 'DD/MM/YYYY')),
-    coalesce(v_prev.hourly_rate, 0),
-    coalesce(v_prev.shuttle_price, 0),
-    coalesce(v_prev.queue_mode, 'sequential')
-  )
-  returning id into v_session_id;
+  if char_length(v_name) = 0 then
+    raise exception 'ต้องใส่ชื่อผู้เล่น';
+  end if;
 
-  insert into courts (session_id, name, sort_order)
-  values (v_session_id, 'คอร์ต 1', 0);
+  select c.owner_id into v_owner_id
+  from sessions s join clubs c on c.id = s.club_id
+  where s.id = p_session_id;
+
+  -- แขกขาจร (p_save_to_master = false) ไม่ถูกบันทึกเข้ารายชื่อ master
+  if p_save_to_master then
+    insert into members (owner_id, name, default_skill)
+    values (v_owner_id, v_name, p_skill)
+    on conflict (owner_id, lower(trim(name)))
+      do update set default_skill = excluded.default_skill
+    returning id into v_member_id;
+
+    if exists (
+      select 1 from players
+      where session_id = p_session_id and member_id = v_member_id
+    ) then
+      raise exception '% อยู่ในวันเล่นนี้แล้ว', v_name;
+    end if;
+  end if;
 
   insert into players (session_id, member_id, name, skill)
-  select v_session_id, m.id, m.name, m.default_skill
-  from members m
-  where m.owner_id = auth.uid() and m.id = any(p_member_ids);
+  values (p_session_id, v_member_id, v_name, p_skill)
+  returning id into v_player_id;
 
-  return v_session_id;
+  return v_player_id;
 end;
 $$;
+
+-- ------------------------------------------------------------
+-- เช็คชื่อ: คนที่ลงชื่อไว้แต่ไม่มา -> absent (ไม่เข้าคิว ไม่ถูกนับหารเงิน)
+-- กลับมา -> waiting และไปต่อท้ายคิว
+-- คนที่อยู่ในคอร์ตแล้วเปลี่ยนไม่ได้ ต้องเอาออกจากคอร์ตก่อน
+-- ------------------------------------------------------------
+create or replace function set_player_attendance(p_player_id uuid, p_present boolean)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_session_id uuid;
+  v_status text;
+begin
+  select session_id, status into v_session_id, v_status
+  from players where id = p_player_id;
+
+  if v_session_id is null or not can_edit_session(v_session_id) then
+    raise exception 'ไม่พบผู้เล่นคนนี้ หรือไม่มีสิทธิ์แก้ไข';
+  end if;
+
+  if v_status = 'playing' then
+    raise exception 'ผู้เล่นอยู่ในคอร์ต ต้องจบเกมหรือยกเลิกคอร์ตก่อน';
+  end if;
+
+  if p_present then
+    update players
+    set status = 'waiting',
+        queue_seq = nextval(pg_get_serial_sequence('players', 'queue_seq'))
+    where id = p_player_id and status = 'absent';
+  else
+    update players set status = 'absent' where id = p_player_id;
+  end if;
+end;
+$$;
+
+-- ------------------------------------------------------------
+-- เอาผู้เล่นที่พักอยู่กลับเข้าคิว (ไปต่อท้ายคิว)
+-- ------------------------------------------------------------
+create or replace function resume_player_queue(p_player_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_session_id uuid;
+begin
+  select session_id into v_session_id from players where id = p_player_id;
+
+  if v_session_id is null or not can_edit_session(v_session_id) then
+    raise exception 'ไม่พบผู้เล่นคนนี้ หรือไม่มีสิทธิ์แก้ไข';
+  end if;
+
+  update players
+  set status = 'waiting',
+      queue_seq = nextval(pg_get_serial_sequence('players', 'queue_seq'))
+  where id = p_player_id and status = 'resting';
+end;
+$$;
+
+
+-- ============================================================
+-- คอร์ตและเกม
+-- ============================================================
 
 -- ------------------------------------------------------------
 -- จับคู่ผู้เล่น 4 คนลงคอร์ต: สร้าง match แบบ 'pending' + match_players
@@ -170,19 +583,22 @@ declare
   v_match_id uuid;
 begin
   select c.session_id, c.name into v_session_id, v_court_name
-  from courts c
-  join sessions s on s.id = c.session_id
-  where c.id = p_court_id and s.owner_id = auth.uid();
+  from courts c where c.id = p_court_id;
 
-  if v_session_id is null then
-    raise exception 'court not found or access denied';
+  if v_session_id is null or not can_edit_session(v_session_id) then
+    raise exception 'ไม่พบคอร์ตนี้ หรือไม่มีสิทธิ์แก้ไข';
+  end if;
+
+  if not exists (select 1 from sessions where id = v_session_id and status = 'playing') then
+    raise exception 'ต้องกดเริ่มวันเล่นก่อนถึงจะจัดคนลงคอร์ตได้';
   end if;
 
   if exists (
     select 1 from players
-    where id = any(p_team_a || p_team_b) and session_id <> v_session_id
+    where id = any(p_team_a || p_team_b)
+      and (session_id <> v_session_id or status = 'absent')
   ) then
-    raise exception 'players do not belong to this session';
+    raise exception 'มีผู้เล่นที่ไม่ได้อยู่ในวันเล่นนี้ หรือถูกทำเครื่องหมายว่าไม่มา';
   end if;
 
   insert into matches (session_id, court_id, court_name, status, started_at)
@@ -214,14 +630,13 @@ security definer
 set search_path = public
 as $$
 declare
+  v_session_id uuid;
   v_player_count int;
 begin
-  if not exists (
-    select 1 from matches m
-    join sessions s on s.id = m.session_id
-    where m.id = p_match_id and s.owner_id = auth.uid()
-  ) then
-    raise exception 'match not found or access denied';
+  select session_id into v_session_id from matches where id = p_match_id;
+
+  if v_session_id is null or not can_edit_session(v_session_id) then
+    raise exception 'ไม่พบเกมนี้ หรือไม่มีสิทธิ์แก้ไข';
   end if;
 
   select count(*) into v_player_count from match_players where match_id = p_match_id;
@@ -234,7 +649,7 @@ begin
   where id = p_match_id and status = 'pending';
 
   if not found then
-    raise exception 'match is not pending';
+    raise exception 'เกมนี้เริ่มไปแล้ว';
   end if;
 end;
 $$;
@@ -255,13 +670,11 @@ declare
   v_team text;
   v_replacement uuid;
 begin
-  select m.session_id into v_session_id
-  from matches m
-  join sessions s on s.id = m.session_id
-  where m.id = p_match_id and s.owner_id = auth.uid() and m.status = 'pending';
+  select session_id into v_session_id
+  from matches where id = p_match_id and status = 'pending';
 
-  if v_session_id is null then
-    raise exception 'match not found, access denied, or already started';
+  if v_session_id is null or not can_edit_session(v_session_id) then
+    raise exception 'ไม่พบเกมนี้ ไม่มีสิทธิ์แก้ไข หรือเกมเริ่มไปแล้ว';
   end if;
 
   select team into v_team
@@ -269,10 +682,11 @@ begin
   where match_id = p_match_id and player_id = p_player_id;
 
   if v_team is null then
-    raise exception 'player is not in this match';
+    raise exception 'ผู้เล่นคนนี้ไม่ได้อยู่ในเกมนี้';
   end if;
 
   -- ลบแถวทิ้ง = ไม่ถูกนับเป็นเกมของคนนี้ตอน finish_match
+  -- (finish_match แตะเฉพาะแถวที่ยังอยู่ จึงไม่ต้องมี flag "เล่นจริงไหม" ที่ไหนเลย)
   delete from match_players where match_id = p_match_id and player_id = p_player_id;
   update players set status = 'resting' where id = p_player_id;
 
@@ -295,7 +709,7 @@ end;
 $$;
 
 -- ------------------------------------------------------------
--- ยกเลิกแมตช์ที่ยังไม่เริ่ม: คืนทุกคนเข้าคิวที่เดิม
+-- ยกเลิกเกมที่ยังไม่เริ่ม: คืนทุกคนเข้าคิวที่เดิม
 -- (ไม่นับเกม ไม่ขยับ queue_seq เพราะยังไม่ได้เล่น)
 -- จำเป็นเพื่อไม่ให้คอร์ตค้าง เวลาสลับตัวแล้วหาคนแทนไม่ได้จนไม่ครบ 4
 -- ------------------------------------------------------------
@@ -305,13 +719,14 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  v_session_id uuid;
 begin
-  if not exists (
-    select 1 from matches m
-    join sessions s on s.id = m.session_id
-    where m.id = p_match_id and s.owner_id = auth.uid() and m.status = 'pending'
-  ) then
-    raise exception 'match not found, access denied, or already started';
+  select session_id into v_session_id
+  from matches where id = p_match_id and status = 'pending';
+
+  if v_session_id is null or not can_edit_session(v_session_id) then
+    raise exception 'ไม่พบเกมนี้ ไม่มีสิทธิ์แก้ไข หรือเกมเริ่มไปแล้ว';
   end if;
 
   update players
@@ -328,7 +743,7 @@ $$;
 -- ------------------------------------------------------------
 -- จบเกม: ปิด match, คืนผู้เล่นเข้าคิว, +1 เกมที่เล่น, ไปต่อท้ายคิว
 -- นับเกมให้เฉพาะคนที่ยังอยู่ใน match_players ตอนจบ
--- (คนที่ถูกสลับออกไปก่อนเริ่มจึงไม่ถูกนับ)
+-- (คนที่ถูกสลับออกไปก่อนเริ่มจึงไม่ถูกนับ — ดู substitute_player)
 -- ------------------------------------------------------------
 create or replace function finish_match(p_match_id uuid)
 returns void
@@ -336,13 +751,13 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  v_session_id uuid;
 begin
-  if not exists (
-    select 1 from matches m
-    join sessions s on s.id = m.session_id
-    where m.id = p_match_id and s.owner_id = auth.uid()
-  ) then
-    raise exception 'match not found or access denied';
+  select session_id into v_session_id from matches where id = p_match_id;
+
+  if v_session_id is null or not can_edit_session(v_session_id) then
+    raise exception 'ไม่พบเกมนี้ หรือไม่มีสิทธิ์แก้ไข';
   end if;
 
   update matches
@@ -350,7 +765,7 @@ begin
   where id = p_match_id and status = 'playing';
 
   if not found then
-    raise exception 'match is not in progress';
+    raise exception 'เกมนี้ยังไม่ได้เริ่ม หรือจบไปแล้ว';
   end if;
 
   update players
@@ -365,7 +780,7 @@ end;
 $$;
 
 -- ------------------------------------------------------------
--- ยกเลิกคอร์ต: ถ้ามีเกมกำลังเล่นอยู่ คืนผู้เล่นเข้าคิว
+-- ลบคอร์ต: ถ้ามีเกมค้างอยู่ คืนผู้เล่นเข้าคิว
 -- (ไม่นับเป็นเกมที่เล่นจบ ไม่เปลี่ยนลำดับคิว) แล้วลบคอร์ตทิ้ง
 -- ------------------------------------------------------------
 create or replace function remove_court(p_court_id uuid)
@@ -375,14 +790,13 @@ security definer
 set search_path = public
 as $$
 declare
+  v_session_id uuid;
   v_match_id uuid;
 begin
-  if not exists (
-    select 1 from courts c
-    join sessions s on s.id = c.session_id
-    where c.id = p_court_id and s.owner_id = auth.uid()
-  ) then
-    raise exception 'court not found or access denied';
+  select session_id into v_session_id from courts where id = p_court_id;
+
+  if v_session_id is null or not can_edit_session(v_session_id) then
+    raise exception 'ไม่พบคอร์ตนี้ หรือไม่มีสิทธิ์แก้ไข';
   end if;
 
   select id into v_match_id
@@ -403,39 +817,28 @@ begin
 end;
 $$;
 
--- ------------------------------------------------------------
--- เอาผู้เล่นที่พักอยู่กลับเข้าคิว (ไปต่อท้ายคิว)
--- ------------------------------------------------------------
-create or replace function resume_player_queue(p_player_id uuid)
-returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  if not exists (
-    select 1 from players p
-    join sessions s on s.id = p.session_id
-    where p.id = p_player_id and s.owner_id = auth.uid()
-  ) then
-    raise exception 'player not found or access denied';
-  end if;
 
-  update players
-  set status = 'waiting',
-      queue_seq = nextval(pg_get_serial_sequence('players', 'queue_seq'))
-  where id = p_player_id and status = 'resting';
-end;
-$$;
+-- ============================================================
+-- Grants — RPC ทุกตัวต้องอยู่ในรายการนี้ ไม่งั้น client เรียกไม่ได้
+-- ============================================================
+grant execute on function create_club(text, text) to authenticated;
+grant execute on function grant_club_access(uuid, text, text) to authenticated;
+grant execute on function revoke_club_access(uuid, uuid) to authenticated;
+grant execute on function list_club_members(uuid) to authenticated;
 
-grant execute on function add_player(uuid, text, smallint) to authenticated;
+grant execute on function last_day_defaults(uuid) to authenticated;
+grant execute on function create_play_day(uuid, date, time, time, uuid, uuid, uuid, numeric, numeric, int, text, uuid[], jsonb, text) to authenticated;
+grant execute on function start_play_day(uuid) to authenticated;
+grant execute on function cancel_play_day(uuid) to authenticated;
 grant execute on function close_session(uuid) to authenticated;
-grant execute on function open_session(text, uuid[]) to authenticated;
+
+grant execute on function add_player(uuid, text, smallint, boolean) to authenticated;
+grant execute on function set_player_attendance(uuid, boolean) to authenticated;
+grant execute on function resume_player_queue(uuid) to authenticated;
+
 grant execute on function assign_court(uuid, uuid[], uuid[]) to authenticated;
 grant execute on function start_match(uuid) to authenticated;
 grant execute on function substitute_player(uuid, uuid) to authenticated;
 grant execute on function cancel_match(uuid) to authenticated;
 grant execute on function finish_match(uuid) to authenticated;
 grant execute on function remove_court(uuid) to authenticated;
-grant execute on function resume_player_queue(uuid) to authenticated;
-grant execute on function get_or_create_my_session() to authenticated;
