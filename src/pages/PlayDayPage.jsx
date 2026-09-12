@@ -86,6 +86,7 @@ export default function PlayDayPage() {
     setAttendance,
     addCourt,
     removeCourt,
+    renameCourt,
     updateCourtHours,
     assignCourt,
     startMatch,
@@ -353,6 +354,7 @@ export default function PlayDayPage() {
                   onChangeQueueMode={updateQueueMode}
                   onAddCourt={addCourt}
                   onRemoveCourt={removeCourt}
+                  onRenameCourt={renameCourt}
                   onAssign={assignCourt}
                   onStart={startMatch}
                   onSubstitute={substitutePlayer}

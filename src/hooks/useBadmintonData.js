@@ -308,6 +308,20 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
     await run(supabase.rpc('remove_court', { p_court_id: last.id }))
   }, [courts, run])
 
+  // ผ่าน RPC เพราะต้องแก้ชื่อที่ snapshot ไว้ใน matches ของเกมที่ยังเล่นอยู่ด้วย
+  const renameCourt = useCallback(
+    async (courtId, name) => {
+      const { error: err } = await supabase.rpc('rename_court', {
+        p_court_id: courtId,
+        p_name: name,
+      })
+      // โยนต่อ ไม่ใช่เก็บใส่ actionError เพราะ EditableName แสดง error เองในช่องกรอก
+      if (err) throw new Error(err.message)
+      await refetchAll()
+    },
+    [refetchAll],
+  )
+
   const assignCourt = useCallback(
     async (courtId) => {
       const waiting = players.filter((p) => p.status === 'waiting')
@@ -385,6 +399,7 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
     setAttendance,
     addCourt,
     removeCourt,
+    renameCourt,
     updateCourtHours,
     assignCourt,
     startMatch,

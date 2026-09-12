@@ -931,6 +931,49 @@ begin
 end;
 $$;
 
+-- ------------------------------------------------------------
+-- เปลี่ยนชื่อคอร์ต — ไปถึงสนามจริงแล้วได้คอร์ตคนละเบอร์กับที่จองไว้
+--
+-- matches.court_name เป็น snapshot ที่ถ่ายไว้ตอน assign_court เกมที่ยัง
+-- เล่นไม่จบต้องเปลี่ยนตามด้วย ส่วนเกมที่จบแล้วคงชื่อเดิม (ตอนนั้นคอร์ต
+-- ชื่อนั้นจริง ๆ) — เพราะแตะสองตารางจึงต้องเป็น RPC ไม่ใช่ update ตรง ๆ
+-- ------------------------------------------------------------
+create or replace function rename_court(p_court_id uuid, p_name text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_session_id uuid;
+  v_status text;
+  v_name text := trim(coalesce(p_name, ''));
+begin
+  select c.session_id, s.status into v_session_id, v_status
+  from courts c join sessions s on s.id = c.session_id
+  where c.id = p_court_id;
+
+  if v_session_id is null or not can_edit_session(v_session_id) then
+    raise exception 'ไม่พบคอร์ตนี้ หรือไม่มีสิทธิ์แก้ไข';
+  end if;
+
+  -- วันที่จบหรือยกเลิกไปแล้วห้ามแตะ ประวัติต้องนิ่ง
+  if v_status not in ('planned', 'playing') then
+    raise exception 'วันเล่นนี้จบหรือถูกยกเลิกไปแล้ว';
+  end if;
+
+  if char_length(v_name) = 0 then
+    raise exception 'ต้องใส่ชื่อคอร์ต';
+  end if;
+
+  update courts set name = v_name where id = p_court_id;
+
+  update matches
+  set court_name = v_name
+  where court_id = p_court_id and ended_at is null;
+end;
+$$;
+
 
 -- ============================================================
 -- Grants — RPC ทุกตัวต้องอยู่ในรายการนี้ ไม่งั้น client เรียกไม่ได้
@@ -957,3 +1000,4 @@ grant execute on function substitute_player(uuid, uuid) to authenticated;
 grant execute on function cancel_match(uuid) to authenticated;
 grant execute on function finish_match(uuid) to authenticated;
 grant execute on function remove_court(uuid) to authenticated;
+grant execute on function rename_court(uuid, text) to authenticated;
