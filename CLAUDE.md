@@ -41,7 +41,9 @@ Auth is email + password (`useAuth`), with a reset-password flow: `onAuthStateCh
 
 `pickNextMatch(waiting, { mode, pairStats })` has two modes, chosen by `sessions.queue_mode`:
 - `sequential` — sort by `gamesPlayed` then `queuedAt`, take the first 4, and split with `bestTeamSplit` (smallest skill-sum gap).
-- `rotate` — consider the first `ROTATE_WINDOW` (8) of that same fair ordering, enumerate every choice of 4 and every 2v2 split, and take the lowest score from the `WEIGHT` table: repeat partners cost most, then repeat opponents, then skill gap, then how far down the queue it reached. Tune by editing `WEIGHT`.
+- `rotate` — `fairPool` first drops anyone who has played more games than the 4th-least-played waiting player, then takes the first `ROTATE_WINDOW` (8) of that fair ordering, enumerates every choice of 4 and every 2v2 split, and scores each with the `WEIGHT` table: repeat partners cost most, then repeat opponents, then skill gap, then how far down the queue it reached. Tune by editing `WEIGHT`.
+
+  Candidate sets are compared **lexicographically — total games played first, `WEIGHT` score only as the tie-break.** Do not fold games-played into the weighted score: a player who has already partnered everyone present always costs a repeat-partner penalty, which outweighs any skip penalty, so a weighted sum skips them game after game. `sequential` mode is the fallback whenever `pairStats` is empty and is unaffected by any of this.
 
 Avoiding repeat pairings is always a **soft** constraint — with exactly 4 waiting it must still pair them, however often they have played together. `pairStats` is a `Map` from `pairKey(a, b)` to `{ together, against }`, built in `useBadmintonData` from `v_pair_history`; an empty map falls back to sequential.
 
