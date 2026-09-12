@@ -36,7 +36,16 @@ const ICON = { size: 19, strokeWidth: 1.8, className: 'form-section-icon', 'aria
  * ราคาปล่อยว่างไว้ได้: ราคาจริงมักรู้ตอนจบวัน ถ้าบังคับกรอกตอนสร้าง
  * จะได้ตัวเลขมั่วที่ไม่มีใครกลับมาแก้
  */
-export default function NewPlayDayForm({ ownerId, onSubmit, onCancel, loadDefaults }) {
+export default function NewPlayDayForm({
+  ownerId,
+  onSubmit,
+  onCancel,
+  loadDefaults,
+  // โหมดแก้ไข: ส่งค่าที่มีอยู่มาแทนการลอกจากวันล่าสุด และซ่อนส่วนเลือกผู้เล่น
+  // เพราะรายชื่อของวันที่สร้างแล้วจัดการที่หน้าวันเล่น (เพิ่ม/พัก/ไม่มา) ไม่ใช่ที่นี่
+  initial = null,
+  submitLabel = "สร้างวันเล่น",
+}) {
   const { members } = useMembers(ownerId)
   const { items: venues } = useMasterList('venues', ownerId)
   const { items: brands } = useMasterList('shuttle_brands', ownerId)
@@ -44,18 +53,18 @@ export default function NewPlayDayForm({ ownerId, onSubmit, onCancel, loadDefaul
 
   // อ่านนาฬิกาครั้งเดียวตอน mount ไม่ใช่ทุก render
   const [today] = useState(todayISO)
-  const [playDate, setPlayDate] = useState(today)
-  const [startTime, setStartTime] = useState('')
-  const [endTime, setEndTime] = useState('')
-  const [venueId, setVenueId] = useState('')
-  const [courts, setCourts] = useState([{ name: 'คอร์ต 1', hours: '' }])
+  const [playDate, setPlayDate] = useState(initial?.playDate ?? today)
+  const [startTime, setStartTime] = useState(initial?.startTime ?? '')
+  const [endTime, setEndTime] = useState(initial?.endTime ?? '')
+  const [venueId, setVenueId] = useState(initial?.venueId ?? '')
+  const [courts, setCourts] = useState(initial?.courts ?? [{ name: 'คอร์ต 1', hours: '' }])
   const [selected, setSelected] = useState(() => new Set())
-  const [brandId, setBrandId] = useState('')
-  const [modelId, setModelId] = useState('')
-  const [shuttleCount, setShuttleCount] = useState('')
-  const [hourlyRate, setHourlyRate] = useState('')
-  const [shuttlePrice, setShuttlePrice] = useState('')
-  const [queueMode, setQueueMode] = useState('sequential')
+  const [brandId, setBrandId] = useState(initial?.brandId ?? '')
+  const [modelId, setModelId] = useState(initial?.modelId ?? '')
+  const [shuttleCount, setShuttleCount] = useState(initial?.shuttleCount ?? '')
+  const [hourlyRate, setHourlyRate] = useState(initial?.hourlyRate ?? '')
+  const [shuttlePrice, setShuttlePrice] = useState(initial?.shuttlePrice ?? '')
+  const [queueMode, setQueueMode] = useState(initial?.queueMode ?? 'sequential')
   const [memberQuery, setMemberQuery] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -70,6 +79,7 @@ export default function NewPlayDayForm({ ownerId, onSubmit, onCancel, loadDefaul
 
   // prefill จากวันล่าสุดของก๊วนนี้ — เคสปกติคือ "เหมือนเดิมทุกอย่าง" กดยืนยันได้เลย
   useEffect(() => {
+    if (initial) return // โหมดแก้ไข ใช้ค่าของวันนั้นอยู่แล้ว
     let alive = true
 
     async function load() {
@@ -99,7 +109,7 @@ export default function NewPlayDayForm({ ownerId, onSubmit, onCancel, loadDefaul
     return () => {
       alive = false
     }
-  }, [loadDefaults])
+  }, [loadDefaults, initial])
 
   const selectedMembers = members.filter((m) => selected.has(m.id))
   const q = memberQuery.trim().toLowerCase()
@@ -159,7 +169,7 @@ export default function NewPlayDayForm({ ownerId, onSubmit, onCancel, loadDefaul
         shuttlePrice: shuttlePrice === '' ? null : Number(shuttlePrice),
         shuttleCount: shuttleCount === '' ? 0 : Number(shuttleCount),
         queueMode,
-        memberIds: [...selected],
+        memberIds: initial ? undefined : [...selected],
         courts: cleanCourts,
       })
     } catch (err) {
@@ -349,6 +359,9 @@ export default function NewPlayDayForm({ ownerId, onSubmit, onCancel, loadDefaul
         </fieldset>
       </FormSection>
 
+      {/* โหมดแก้ไขไม่มีส่วนนี้ — รายชื่อของวันที่สร้างแล้วจัดการที่หน้าวันเล่น
+          (เพิ่ม/พัก/ไม่มา) การให้แก้สองที่จะงงว่าอันไหนคือของจริง */}
+      {!initial && (
       <FormSection
         icon={<Users {...ICON} />}
         title="ผู้เล่น"
@@ -417,6 +430,7 @@ export default function NewPlayDayForm({ ownerId, onSubmit, onCancel, loadDefaul
           </>
         )}
       </FormSection>
+      )}
 
       <FormSection
         icon={<Feather {...ICON} />}
@@ -514,7 +528,7 @@ export default function NewPlayDayForm({ ownerId, onSubmit, onCancel, loadDefaul
 
       <div className="form-actions">
         <button className="btn-primary" type="submit" disabled={busy}>
-          {busy ? 'กำลังบันทึก...' : 'สร้างวันเล่น'}
+          {busy ? 'กำลังบันทึก...' : submitLabel}
         </button>
         <button className="btn-ghost" type="button" onClick={onCancel}>
           ยกเลิก

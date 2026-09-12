@@ -227,14 +227,17 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
 
   // ผ่าน RPC เพราะต้องสร้าง/อัปเดตแถวใน members ไปพร้อมกันใน transaction เดียว
   // (รายชื่อสมาชิกจึงสะสมขึ้นมาเองโดยไม่ต้องมีหน้าจัดการแยก)
+  // saveToMaster = false คือแขกขาจร: เล่นวันนี้วันเดียว ไม่ต้องไปโผล่ในรายชื่อ
+  // (member_id เป็น null ได้ ประวัติเลยยังอยู่ครบแม้ไม่มีสมาชิกผูกไว้)
   const addPlayer = useCallback(
-    async (name, skill) => {
+    async (name, skill, saveToMaster = true) => {
       if (!sessionId) return
       await run(
         supabase.rpc('add_player', {
           p_session_id: sessionId,
           p_name: name,
           p_skill: skill,
+          p_save_to_master: saveToMaster,
         }),
       )
     },
@@ -307,6 +310,20 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
     if (!last) return
     await run(supabase.rpc('remove_court', { p_court_id: last.id }))
   }, [courts, run])
+
+  // ผ่าน RPC เพราะต้องแก้ชื่อที่ snapshot ไว้ใน matches ของเกมที่ยังเล่นอยู่ด้วย
+  const renameCourt = useCallback(
+    async (courtId, name) => {
+      const { error: err } = await supabase.rpc('rename_court', {
+        p_court_id: courtId,
+        p_name: name,
+      })
+      // โยนต่อ ไม่ใช่เก็บใส่ actionError เพราะ EditableName แสดง error เองในช่องกรอก
+      if (err) throw new Error(err.message)
+      await refetchAll()
+    },
+    [refetchAll],
+  )
 
   const assignCourt = useCallback(
     async (courtId) => {
@@ -385,6 +402,7 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
     setAttendance,
     addCourt,
     removeCourt,
+    renameCourt,
     updateCourtHours,
     assignCourt,
     startMatch,

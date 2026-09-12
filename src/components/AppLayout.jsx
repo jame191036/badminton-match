@@ -1,44 +1,51 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import ThemeToggle from './ThemeToggle'
-import AsyncButton from './AsyncButton'
+import UserMenu from './UserMenu'
 
 const NAV = [
   { to: '/', label: 'ก๊วนของฉัน', end: true },
   { to: '/master', label: 'ข้อมูลหลัก', end: false },
 ]
 
+/**
+ * แถบบนบางติดขอบจอ — ไม่ทำเป็นลิ้นชักสไลด์ข้าง เพราะมีลิงก์แค่ 2 อัน
+ * ที่กดบ่อยทั้งคู่ ซ่อนไว้ในลิ้นชักจะกลายเป็นเพิ่มคลิกทุกครั้งที่สลับหน้า
+ */
 export default function AppLayout({ user, theme, onToggleTheme, onSignOut }) {
   return (
-    <div className="app-shell">
-      <header className="app-header">
-        <div className="header-top">
-          <AsyncButton className="btn-ghost btn-on-dark" busyLabel="กำลังออก..." onClick={onSignOut}>
-            ออกจากระบบ
-          </AsyncButton>
-          <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-        </div>
+    <>
+      <header className="app-bar">
+        <div className="app-bar-inner">
+          <NavLink to="/" className="brand" end>
+            <span className="brand-mark" aria-hidden="true">
+              🏸
+            </span>
+            <span className="brand-name">จับคู่ลงคอร์ต</span>
+          </NavLink>
 
-        <div className="header-inner">
-          <span className="eyebrow mono">จัดก๊วนแบด</span>
-          <h1 className="display">จับคู่ลงคอร์ต 🏸</h1>
-          <p className="header-sub">{user?.email}</p>
-        </div>
+          <nav className="app-nav">
+            {NAV.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                className={({ isActive }) => `app-nav-link${isActive ? ' is-active' : ''}`}
+              >
+                {item.label}
+              </NavLink>
+            ))}
+          </nav>
 
-        <nav className="app-nav">
-          {NAV.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={({ isActive }) => `app-nav-link${isActive ? ' is-active' : ''}`}
-            >
-              {item.label}
-            </NavLink>
-          ))}
-        </nav>
+          <div className="app-bar-right">
+            <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+            <UserMenu email={user?.email} onSignOut={onSignOut} />
+          </div>
+        </div>
       </header>
 
-      <Outlet context={{ user }} />
-    </div>
+      <div className="app-shell">
+        <Outlet context={{ user }} />
+      </div>
+    </>
   )
 }

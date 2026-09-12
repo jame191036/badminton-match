@@ -35,7 +35,7 @@ export default function ClubSettingsPanel({ club, stats, onRename, onDelete }) {
     // ให้พิมพ์ชื่อก๊วนยืนยัน เพราะลบแล้วพาวันเล่นและยอดเงินทั้งหมดไปด้วย
     const ok = await confirm({
       title: `ลบก๊วน "${club.name}" ถาวร?`,
-      message: `${stats.dayCount} วันเล่น · ${stats.gameCount} เกม และยอดเงินทั้งหมดของก๊วนนี้จะหายไปด้วย กู้คืนไม่ได้`,
+      message: `วันเล่นทั้ง ${stats.dayCount} วัน พร้อมประวัติเกมและยอดเงินทั้งหมดของก๊วนนี้จะหายไปด้วย กู้คืนไม่ได้`,
       requireText: club.name,
       confirmLabel: 'ลบก๊วนถาวร',
       danger: true,
@@ -88,7 +88,7 @@ export default function ClubSettingsPanel({ club, stats, onRename, onDelete }) {
       <div className="danger-zone">
         <h3 className="section-head">ลบก๊วนนี้</h3>
         <p className="panel-hint">
-          ลบแล้ว <strong>{stats.dayCount} วันเล่น</strong> · <strong>{stats.gameCount} เกม</strong>{' '}
+          ลบแล้ว <strong>วันเล่นทั้ง {stats.dayCount} วัน</strong> พร้อมประวัติเกม
           และยอดเงินทั้งหมดของก๊วนนี้จะหายไปด้วย กู้คืนไม่ได้
         </p>
 

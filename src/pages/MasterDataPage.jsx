@@ -260,7 +260,7 @@ function MembersTab({ userId, canEdit, canDelete }) {
                       confirmLabel: 'ลบชื่อนี้',
                       danger: true,
                     })
-                    if (ok) removeMember(m.id)
+                    if (ok) await safely(() => removeMember(m.id), setFormError)
                   }}
                 >
                   ลบ
@@ -378,7 +378,7 @@ function VenuesTab({ userId, canEdit, canDelete }) {
                         confirmLabel: 'ลบสนาม',
                         danger: true,
                       })
-                      if (ok) remove(v.id)
+                      if (ok) await safely(() => remove(v.id), setFormError)
                     }}
                   >
                     ลบ
@@ -556,7 +556,7 @@ function BrandRow({
               confirmLabel: 'ลบยี่ห้อ',
               danger: true,
             })
-            if (ok) onRemoveBrand()
+            if (ok) await safely(() => onRemoveBrand(), setError)
           }}
         >
           ลบยี่ห้อ
@@ -592,7 +592,7 @@ function BrandRow({
                       confirmLabel: 'ลบรุ่น',
                       danger: true,
                     })
-                    if (ok) onRemoveModel(m.id)
+                    if (ok) await safely(() => onRemoveModel(m.id), setError)
                   }}
                 >
                   ลบ
@@ -632,6 +632,20 @@ function BrandRow({
 function MasterError({ message }) {
   if (!message) return null
   return <p className="auth-error" style={{ margin: '12px 0 0' }}>{message}</p>
+}
+
+/**
+ * เรียกคำสั่งลบแล้วส่ง error ไปแสดงในช่องข้อความของส่วนนั้น
+ *
+ * hook พวกนี้ throw เมื่อ DB ปฏิเสธ (เช่น RLS ไม่ให้ลบของคนอื่น) ถ้าไม่ดัก
+ * จะกลายเป็น unhandled rejection — ผู้ใช้เห็นแค่ปุ่มหยุดหมุนแล้วของยังอยู่
+ */
+async function safely(fn, onError) {
+  try {
+    await fn()
+  } catch (err) {
+    onError(err.message)
+  }
 }
 
 /** กรองลิสต์ด้วยคำค้น มองทั้งชื่อและหมายเหตุ (และรุ่น ถ้าส่งมา) */

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { QUEUE_MODES, skillLabel } from '../utils/pairing'
 import AsyncButton from './AsyncButton'
+import EditableName from './EditableName'
 
 // นาฬิกาเดินตัวเดียวใช้ร่วมกันทุกคอร์ต ดีกว่าให้แต่ละคอร์ตตั้ง interval เอง
 function useNow(active) {
@@ -62,6 +63,7 @@ export default function CourtBoard({
   onFinish,
   onAddCourt,
   onRemoveCourt,
+  onRenameCourt,
   queueMode,
   onChangeQueueMode,
 }) {
@@ -118,7 +120,15 @@ export default function CourtBoard({
               className={`court-card ${match ? (isPending ? 'pending' : 'occupied') : 'empty'}`}
             >
               <div className="court-head">
-                <span className="court-name display">{court.name}</span>
+                {/* กดดินสอแก้ชื่อได้ — ไปถึงสนามจริงแล้วมักได้คอร์ตคนละเบอร์ */}
+                <EditableName
+                  label="ชื่อคอร์ต"
+                  readOnly={readOnly}
+                  fields={[{ key: 'name', value: court.name, placeholder: 'ชื่อคอร์ต', required: true }]}
+                  onSave={(v) => onRenameCourt(court.id, v.name)}
+                >
+                  <span className="court-name display">{court.name}</span>
+                </EditableName>
                 {match && (
                   <span className={`court-status mono ${isPending ? 'is-pending' : 'is-playing'}`}>
                     {isPending

@@ -87,5 +87,13 @@ export function useClubs(userId) {
     [refetch],
   )
 
-  return { clubs, loading, error, createClub, updateClub, removeClub, refetch }
+  return {
+    clubs,
+    loading: userId ? loading : false,
+    error,
+    createClub,
+    updateClub,
+    removeClub,
+    refetch,
+  }
 }

@@ -93,6 +93,18 @@ function scoreSplit(split, pairStats, queueSkip) {
   )
 }
 
+/**
+ * วงผู้เล่นที่หยิบมาพิจารณาในโหมด rotate
+ *
+ * ตัดคนที่เล่นไปมากกว่า "คนที่ 4 จากล่างสุด" ออกเลย — ไม่มีเหตุผลให้คนที่
+ * เล่นเยอะกว่าลงก่อน ในเมื่อยังมีคนอื่นที่เล่นน้อยกว่าครบ 4 คนอยู่แล้ว
+ * ที่เหลือค่อยเอา ROTATE_WINDOW คนแรกมาลองจับดู
+ */
+function fairPool(sorted) {
+  const cap = sorted[3].gamesPlayed
+  return sorted.filter((p) => p.gamesPlayed <= cap).slice(0, ROTATE_WINDOW)
+}
+
 // ทุกวิธีเลือก 4 คนจากรายชื่อ (คืน index มาด้วยเพื่อคิดค่าข้ามคิว)
 function* chooseFour(list) {
   for (let i = 0; i < list.length - 3; i++)
@@ -130,18 +142,26 @@ export function pickNextMatch(waitingPlayers, options = {}) {
     return { teamA, teamB, playerIds: four.map((p) => p.id) }
   }
 
-  const window = sorted.slice(0, Math.min(ROTATE_WINDOW, sorted.length))
+  const window = fairPool(sorted)
 
   let best = null
+  let bestGames = Infinity
   let bestScore = Infinity
 
   for (const { players, indices } of chooseFour(window)) {
     // 0,1,2,3 คือชุดหัวคิวพอดี = ไม่ข้ามใครเลย
     const queueSkip = indices.reduce((s, idx) => s + idx, 0) - 6
+    const totalGames = players.reduce((s, p) => s + p.gamesPlayed, 0)
+
+    // ชุดที่เล่นรวมกันน้อยกว่าชนะเสมอ ไม่ว่าคะแนนคู่ซ้ำจะเป็นเท่าไหร่
+    // (ถ้าเอาสองอย่างมาบวกกันด้วยน้ำหนัก คนที่เคยจับคู่กับทุกคนในวงแล้ว
+    //  จะโดนข้ามไปเรื่อย ๆ เพราะค่าคู่ซ้ำแพงกว่าค่าตกคิวอยู่ตลอด)
+    if (totalGames > bestGames) continue
 
     for (const split of splitsOf(players)) {
       const score = scoreSplit(split, pairStats, queueSkip)
-      if (score < bestScore) {
+      if (totalGames < bestGames || score < bestScore) {
+        bestGames = totalGames
         bestScore = score
         best = split
       }

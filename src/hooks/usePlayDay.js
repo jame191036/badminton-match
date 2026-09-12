@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 function mapDay(row) {
@@ -11,6 +11,10 @@ function mapDay(row) {
     status: row.status,
     venueName: row.venue_name,
     shuttleBrandName: row.shuttle_brand_name,
+    // id ของ master ไว้ให้หน้าแก้ไขเลือกค่าเดิมกลับมาได้ (ชื่อเป็นแค่ snapshot)
+    venueId: row.venue_id,
+    shuttleBrandId: row.shuttle_brand_id,
+    shuttleModelId: row.shuttle_model_id,
     queueMode: row.queue_mode ?? 'sequential',
     closedAt: row.closed_at,
     finals: {
@@ -34,6 +38,8 @@ export function usePlayDay(sessionId) {
   const [role, setRole] = useState(null)
   const [ownerId, setOwnerId] = useState(null)
   const [billing, setBilling] = useState({ hourlyRate: '', shuttlePrice: '', shuttleCount: '' })
+  // คอร์ตที่จองของวันนี้ — หน้าแก้ไขต้องใช้ ส่วนกระดานใช้ชุดของ useBadmintonData
+  const [courts, setCourts] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   // error ของการบันทึกราคา/โหมดคิว — เดิมกลืนหายไปเฉยๆ
@@ -43,16 +49,21 @@ export function usePlayDay(sessionId) {
   const refetch = useCallback(() => setReloadKey((k) => k + 1), [])
   const clearSaveError = useCallback(() => setSaveError(''), [])
 
+  // เวลาที่แก้ราคาครั้งล่าสุด — ใช้กันไม่ให้ realtime เขียนทับขณะกำลังพิมพ์
+  const lastEditRef = useRef(0)
+  // ตัวจับเวลาหน่วงการบันทึกราคา และค่าล่าสุดที่รอเขียน
+  const saveTimerRef = useRef(null)
+  const pendingRef = useRef(null)
+
   useEffect(() => {
     if (!sessionId) return
     let alive = true
 
     async function load() {
-      const { data, error: err } = await supabase
-        .from('sessions')
-        .select('*')
-        .eq('id', sessionId)
-        .maybeSingle()
+      const [{ data, error: err }, courtsRes] = await Promise.all([
+        supabase.from('sessions').select('*').eq('id', sessionId).maybeSingle(),
+        supabase.from('courts').select('*').eq('session_id', sessionId).order('sort_order'),
+      ])
 
       if (!alive) return
       if (err) {
@@ -64,6 +75,7 @@ export function usePlayDay(sessionId) {
       if (data) {
         setError('')
         setDay(mapDay(data))
+        setCourts(courtsRes.data ?? [])
         setBilling({
           hourlyRate: data.hourly_rate ? String(data.hourly_rate) : '',
           shuttlePrice: data.shuttle_price ? String(data.shuttle_price) : '',
@@ -92,29 +104,93 @@ export function usePlayDay(sessionId) {
     }
   }, [sessionId, reloadKey])
 
-  const updateBilling = useCallback(
-    async (next) => {
-      setBilling(next) // optimistic ให้พิมพ์ลื่น ค่อยยิงขึ้น server
-      if (!sessionId) return
-      const { error: err } = await supabase
-        .from('sessions')
-        .update({
-          hourly_rate: next.hourlyRate === '' ? 0 : Number(next.hourlyRate),
-          shuttle_price: next.shuttlePrice === '' ? 0 : Number(next.shuttlePrice),
-          shuttle_count: next.shuttleCount === '' ? 0 : Number(next.shuttleCount),
-        })
-        .eq('id', sessionId)
+  /** เขียนราคาที่ค้างอยู่ลง DB — เรียกจากตัวจับเวลา หรือตอนออกจากหน้า */
+  const flushBilling = useCallback(async () => {
+    const next = pendingRef.current
+    if (!next || !sessionId) return
+    pendingRef.current = null
 
-      // ถ้าไม่ดักไว้ ตัวเลขบนจอจะเปลี่ยนตามที่พิมพ์แต่ไม่ได้บันทึกจริง
-      if (err) {
-        console.error(err)
-        setSaveError(`บันทึกราคาไม่สำเร็จ: ${err.message}`)
-      } else {
-        setSaveError('')
-      }
+    const { error: err } = await supabase
+      .from('sessions')
+      .update({
+        hourly_rate: next.hourlyRate === '' ? 0 : Number(next.hourlyRate),
+        shuttle_price: next.shuttlePrice === '' ? 0 : Number(next.shuttlePrice),
+        shuttle_count: next.shuttleCount === '' ? 0 : Number(next.shuttleCount),
+      })
+      .eq('id', sessionId)
+
+    // ถ้าไม่ดักไว้ ตัวเลขบนจอจะเปลี่ยนตามที่พิมพ์แต่ไม่ได้บันทึกจริง
+    if (err) {
+      console.error(err)
+      setSaveError(`บันทึกราคาไม่สำเร็จ: ${err.message}`)
+    } else {
+      setSaveError('')
+    }
+  }, [sessionId])
+
+  /**
+   * แก้ราคา — ขึ้นจอทันที แต่หน่วงการเขียน DB ไว้ 600ms
+   *
+   * เดิมยิงทุกตัวอักษร พิมพ์ "300" = เขียน 3 ครั้ง แล้ว realtime ก็เด้งกลับมา
+   * อีก 3 รอบให้ทุกเครื่องที่เปิดอยู่ เปลืองและกระตุกบนเน็ตมือถือ
+   */
+  const updateBilling = useCallback(
+    (next) => {
+      setBilling(next) // optimistic ให้พิมพ์ลื่น ค่อยยิงขึ้น server
+      lastEditRef.current = Date.now()
+      pendingRef.current = next
+
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = setTimeout(flushBilling, 600)
     },
-    [sessionId],
+    [flushBilling],
   )
+
+  // ปิดหน้าไปตอนยังหน่วงอยู่ ต้องเขียนให้จบ ไม่งั้นตัวเลขที่พิมพ์ล่าสุดหายเงียบ ๆ
+  useEffect(() => {
+    return () => {
+      clearTimeout(saveTimerRef.current)
+      flushBilling()
+    }
+  }, [flushBilling])
+
+  /**
+   * ฟังการเปลี่ยนแปลงของวันเล่นนี้จากเครื่องอื่น
+   *
+   * เคสที่เกิดจริงคือเพื่อนกด "เริ่มวันเล่น" หรือ "จบการเล่น" จากมือถือเขา
+   * แล้วเครื่องเราต้องรู้ ไม่ใช่ค้างอยู่ที่สถานะเดิมจนกดอะไรไม่ได้
+   *
+   * ใช้ข้อมูลจาก payload ตรง ๆ ไม่ refetch เพราะ start/close เป็น UPDATE
+   * ซึ่งส่งค่าทุกคอลัมน์มาให้อยู่แล้ว ประหยัดไปหนึ่ง round-trip
+   */
+  useEffect(() => {
+    if (!sessionId) return
+
+    const channel = supabase
+      .channel(`session-meta-${sessionId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'sessions', filter: `id=eq.${sessionId}` },
+        (payload) => {
+          const row = payload.new
+          if (!row) return
+          setDay(mapDay(row))
+
+          // ราคาอัปเดตเฉพาะตอนที่เราไม่ได้เพิ่งพิมพ์เอง ไม่งั้นตัวเลขในช่อง
+          // จะกระตุกกลับระหว่างพิมพ์ (echo ของการบันทึกตัวเราเองก็เข้าทางนี้)
+          if (Date.now() - lastEditRef.current > 3000) {
+            setBilling({
+              hourlyRate: row.hourly_rate ? String(row.hourly_rate) : '',
+              shuttlePrice: row.shuttle_price ? String(row.shuttle_price) : '',
+              shuttleCount: row.shuttle_count ? String(row.shuttle_count) : '',
+            })
+          }
+        },
+      )
+      .subscribe()
+
+    return () => supabase.removeChannel(channel)
+  }, [sessionId])
 
   const updateQueueMode = useCallback(
     async (mode) => {
@@ -141,14 +217,20 @@ export function usePlayDay(sessionId) {
   }, [sessionId, refetch])
 
   // จบวัน = freeze ยอดลง final_* ฝั่ง DB แล้วแก้อะไรไม่ได้อีก
+  //
+  // ต้อง flush ราคาที่ยังหน่วงอยู่ก่อน ไม่งั้นคนพิมพ์ค่าลูกแล้วกดจบทันที
+  // ยอดที่ freeze จะเป็นค่าเก่า และแก้ทีหลังไม่ได้แล้ว
   const closeDay = useCallback(async () => {
+    clearTimeout(saveTimerRef.current)
+    await flushBilling()
     const { error: err } = await supabase.rpc('close_session', { p_session_id: sessionId })
     if (err) throw new Error(err.message)
     refetch()
-  }, [sessionId, refetch])
+  }, [sessionId, refetch, flushBilling])
 
   return {
     day,
+    courts,
     role,
     ownerId,
     // viewer ดูได้อย่างเดียว — ตรงกับ can_edit_session ฝั่ง DB

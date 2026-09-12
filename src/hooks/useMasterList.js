@@ -77,5 +77,15 @@ export function useMasterList(table, userId) {
     [table, refetch],
   )
 
-  return { items, loading, error, add, update, remove, refetch }
+  return {
+    items,
+    // ไม่มี id = ไม่ได้กำลังโหลด ไม่ใช่โหลดค้าง — คำนวณตรงนี้แทนการ
+    // setState ในเอฟเฟกต์ ซึ่งทำให้เกิด render ซ้อนโดยไม่จำเป็น
+    loading: userId ? loading : false,
+    error,
+    add,
+    update,
+    remove,
+    refetch,
+  }
 }
