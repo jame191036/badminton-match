@@ -68,12 +68,14 @@ export default function BillingPanel({
   const shuttleTotal = shuttleCount * shuttlePrice
   const total = courtTotal + shuttleTotal
 
-  const payerCount = players.filter((p) => p.paying !== false).length
-  // หารเท่ากันทุกคนที่ร่วมจ่าย ไม่หารตามจำนวนเกมที่เล่น
+  // คนที่กด "ไม่มา" ไม่ถูกนับทั้งตัวหารและรายชื่อ — ต้องตรงกับ v_billing_summary
+  const present = players.filter((p) => p.status !== 'absent')
+  const payerCount = present.filter((p) => p.paying !== false).length
+  // หารเท่ากันทุกคนที่มาและร่วมจ่าย ไม่หารตามจำนวนเกมที่เล่น
   const perTotal = payerCount > 0 ? total / payerCount : 0
 
-  if (players.length === 0) {
-    return <p className="empty-state">เพิ่มผู้เล่นก่อน ถึงจะหารค่าใช้จ่ายได้</p>
+  if (present.length === 0) {
+    return <p className="empty-state">ยังไม่มีคนที่มาเล่น ถึงจะหารค่าใช้จ่ายได้</p>
   }
 
   return (
@@ -163,9 +165,9 @@ export default function BillingPanel({
       </div>
 
       <div className="billing-players">
-        <h3>ผู้ร่วมจ่าย ({payerCount}/{players.length})</h3>
+        <h3>ผู้ร่วมจ่าย ({payerCount}/{present.length})</h3>
         <ul className="billing-list">
-          {players.map((p) => {
+          {present.map((p) => {
             const isPaying = p.paying !== false
             return (
               <li key={p.id} className={`billing-item ${isPaying ? '' : 'excluded'}`}>

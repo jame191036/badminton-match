@@ -1,10 +1,65 @@
 -- ============================================================
--- Badminton Queue & Court Management — Supabase Schema
--- แปลงจาก state เดิม (players / courts / history / billing ใน
--- localStorage) ให้เป็นตารางเชิงสัมพันธ์ รองรับหลายก๊วน + Supabase Auth
+-- Badminton Club Manager — Supabase Schema (v2)
+-- ------------------------------------------------------------
+-- โครงสร้าง 2 ชั้น:
+--   master  : clubs / members / venues / shuttle_brands  — ของถาวร ตั้งไว้ล่วงหน้า
+--   รายวัน  : sessions (= "วันเล่น") / players / courts / matches / match_players
+--
+-- คำที่สับสนง่าย:
+--   venues = "สนาม" คือสถานที่ (master)
+--   courts = "คอร์ต" ที่จองในวันนั้น + จำนวนชั่วโมง (รายวัน, เป็นตัวคูณค่าสนาม)
+--
+-- ไฟล์นี้เป็น source of truth สำหรับฐานข้อมูลใหม่ — รันทั้งไฟล์ใน SQL editor
 -- ============================================================
 
 create extension if not exists "pgcrypto"; -- สำหรับ gen_random_uuid()
+
+
+-- ============================================================
+-- RESET — ลบของเดิมทิ้งก่อน เพื่อให้รันไฟล์นี้ซ้ำได้เรื่อยๆ
+-- ------------------------------------------------------------
+-- *** ลบข้อมูลทั้งหมดในตารางเหล่านี้ ***
+-- มีไว้เพราะถ้าสคริปต์พังกลางทาง จะได้แก้แล้วรันใหม่ตั้งแต่ต้นได้เลย
+-- ไม่ต้องตามเก็บว่าคำสั่งไหนผ่านไปแล้วบ้าง
+-- ถ้ามีข้อมูลจริงที่ต้องรักษาไว้ ให้ลบ block นี้ออกก่อนรัน
+-- (ไม่แตะ schema auth ของ Supabase — บัญชีผู้ใช้ยังอยู่ครบ)
+-- ============================================================
+drop view if exists
+  v_waiting_queue, v_court_board, v_match_history, v_billing_summary,
+  v_session_player_stats, v_session_summary, v_pair_history,
+  v_club_days, v_member_stats, v_my_clubs, v_session_archive cascade;
+
+drop table if exists
+  match_players, matches, courts, players, sessions,
+  club_access, clubs, members, venues, shuttle_models, shuttle_brands cascade;
+
+-- ลบฟังก์ชันเดิมทุก overload (create or replace ไม่ทับของที่ signature เปลี่ยนไป
+-- เช่น add_player เดิมรับ 3 พารามิเตอร์ ตัวใหม่รับ 4 — ของเก่าจะค้างอยู่)
+do $reset$
+declare
+  r record;
+begin
+  for r in
+    select p.oid::regprocedure as sig
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname in (
+        'set_updated_at',
+        'can_view_club', 'can_edit_club', 'is_club_owner',
+        'can_view_session', 'can_edit_session', 'has_master_access',
+        'create_club', 'grant_club_access', 'revoke_club_access', 'list_club_members',
+        'last_day_defaults', 'create_play_day', 'start_play_day', 'cancel_play_day',
+        'close_session', 'open_session', 'get_or_create_my_session',
+        'add_player', 'set_player_attendance', 'resume_player_queue',
+        'assign_court', 'start_match', 'substitute_player', 'cancel_match',
+        'finish_match', 'remove_court'
+      )
+  loop
+    execute 'drop function if exists ' || r.sig || ' cascade';
+  end loop;
+end
+$reset$;
 
 -- ---------- helper: auto update updated_at ----------
 create or replace function set_updated_at()
@@ -17,15 +72,60 @@ $$ language plpgsql;
 
 
 -- ============================================================
--- 0. members — ตัวตนของผู้เล่น ใช้ข้ามก๊วน (master data)
---    players จะ snapshot ชื่อ/สกิลของแต่ละครั้งไว้ต่างหาก
---    เปลี่ยนชื่อสมาชิกทีหลังจึงไม่ทำให้ประวัติเก่าเพี้ยน
+-- MASTER DATA
 -- ============================================================
+
+-- ------------------------------------------------------------
+-- clubs — "ก๊วน" คือกลุ่มคนที่ตีด้วยกันประจำ อยู่ถาวร
+-- (ต่างจาก sessions ซึ่งคือ "วันเล่น" ครั้งเดียว)
+-- ------------------------------------------------------------
+create table clubs (
+  id         uuid primary key default gen_random_uuid(),
+  owner_id   uuid not null references auth.users(id) on delete cascade,
+  name       text not null check (char_length(trim(name)) > 0),
+  note       text,
+  active     boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index idx_clubs_owner on clubs(owner_id);
+
+create trigger trg_clubs_updated_at
+  before update on clubs
+  for each row execute function set_updated_at();
+
+
+-- ------------------------------------------------------------
+-- club_access — ใครเข้าถึงก๊วนนี้ได้บ้าง
+--   owner  = เจ้าของ แก้ได้ทุกอย่าง ลบก๊วนได้ แชร์ให้คนอื่นได้
+--   editor = จัดวันเล่น จับคู่ลงคอร์ตได้ แต่แชร์ต่อไม่ได้
+--   viewer = ดูอย่างเดียว
+-- เจ้าของก๊วนจะมีแถวที่นี่ role='owner' เสมอ (ใส่ให้ตอน create_club)
+-- ------------------------------------------------------------
+create table club_access (
+  id         uuid primary key default gen_random_uuid(),
+  club_id    uuid not null references clubs(id) on delete cascade,
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  role       text not null check (role in ('owner', 'editor', 'viewer')),
+  created_at timestamptz not null default now()
+);
+
+create unique index uq_club_access on club_access(club_id, user_id);
+create index idx_club_access_user on club_access(user_id);
+
+
+-- ------------------------------------------------------------
+-- members — รายชื่อผู้เล่น เก็บรวมชุดเดียวต่อผู้ใช้ ไม่แยกตามก๊วน
+-- players จะ snapshot ชื่อ/มือของแต่ละวันไว้ต่างหาก
+-- เปลี่ยนชื่อสมาชิกทีหลังจึงไม่ทำให้ประวัติเก่าเพี้ยน
+-- ------------------------------------------------------------
 create table members (
   id            uuid primary key default gen_random_uuid(),
   owner_id      uuid not null references auth.users(id) on delete cascade,
   name          text not null check (char_length(trim(name)) > 0),
   default_skill smallint not null default 2 check (default_skill between 1 and 3),
+  note          text,
   active        boolean not null default true,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
@@ -41,25 +141,127 @@ create trigger trg_members_updated_at
   for each row execute function set_updated_at();
 
 
+-- ------------------------------------------------------------
+-- venues — สถานที่ที่ไปตี (ไม่ใช่คอร์ต)
+-- ตั้งใจไม่เก็บราคาไว้ที่นี่ — ราคาค่าสนามอยู่ที่ sessions.hourly_rate ของแต่ละวัน
+-- ที่เดียว มีสองที่แล้วจะสับสนว่าอันไหนคืออันจริง
+-- (ฟอร์มสร้างวันเล่น prefill ราคาจากวันล่าสุดของก๊วนนั้นแทน ซึ่งแม่นกว่า)
+-- ------------------------------------------------------------
+create table venues (
+  id          uuid primary key default gen_random_uuid(),
+  owner_id    uuid not null references auth.users(id) on delete cascade,
+  name        text not null check (char_length(trim(name)) > 0),
+  note        text,
+  court_count int not null default 1 check (court_count >= 0),
+  active      boolean not null default true,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
+create index idx_venues_owner on venues(owner_id);
+
+create unique index uq_venues_owner_name
+  on venues(owner_id, lower(trim(name)));
+
+create trigger trg_venues_updated_at
+  before update on venues
+  for each row execute function set_updated_at();
+
+
+-- ------------------------------------------------------------
+-- shuttle_brands — ยี่ห้อลูกแบด ตั้งใจไม่เก็บราคา
+-- ราคาลูกอยู่ที่ sessions.shuttle_price ของแต่ละวัน เพราะราคาเปลี่ยนบ่อย
+-- และยอดของวันที่จ่ายไปแล้วต้องไม่ขยับตามราคาใหม่
+-- ------------------------------------------------------------
+create table shuttle_brands (
+  id         uuid primary key default gen_random_uuid(),
+  owner_id   uuid not null references auth.users(id) on delete cascade,
+  name       text not null check (char_length(trim(name)) > 0),
+  note       text,
+  active     boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index idx_shuttle_brands_owner on shuttle_brands(owner_id);
+
+create unique index uq_shuttle_brands_owner_name
+  on shuttle_brands(owner_id, lower(trim(name)));
+
+create trigger trg_shuttle_brands_updated_at
+  before update on shuttle_brands
+  for each row execute function set_updated_at();
+
+
+-- ------------------------------------------------------------
+-- shuttle_models — รุ่นของลูกแบด อยู่ใต้ยี่ห้อ
+-- แยกตารางเพื่อให้ยี่ห้อเดียวมีหลายรุ่นโดยไม่ต้องพิมพ์ชื่อยี่ห้อซ้ำ
+-- และเปลี่ยนชื่อยี่ห้อทีเดียวมีผลกับทุกรุ่น
+-- ไม่มี owner_id ของตัวเอง — สิทธิ์ตัดสินผ่านยี่ห้อแม่
+-- ------------------------------------------------------------
+create table shuttle_models (
+  id         uuid primary key default gen_random_uuid(),
+  brand_id   uuid not null references shuttle_brands(id) on delete cascade,
+  name       text not null check (char_length(trim(name)) > 0),
+  note       text,
+  active     boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index idx_shuttle_models_brand on shuttle_models(brand_id);
+
+create unique index uq_shuttle_models_brand_name
+  on shuttle_models(brand_id, lower(trim(name)));
+
+create trigger trg_shuttle_models_updated_at
+  before update on shuttle_models
+  for each row execute function set_updated_at();
+
+
 -- ============================================================
--- 1. sessions  — หนึ่งแถว = หนึ่ง "ก๊วน" (หนึ่งครั้งที่ไปตี)
---    closed_at is null = ก๊วนที่กำลังเล่นอยู่ (มีได้ทีละอันต่อผู้ใช้)
---    ปิดแล้วยอดเงิน/สถิติจะถูก freeze ไว้ในคอลัมน์ final_* ไม่คำนวณสดอีก
+-- ข้อมูลรายวัน
 -- ============================================================
+
+-- ------------------------------------------------------------
+-- sessions — หนึ่งแถว = "หนึ่งวันเล่น" ของก๊วนหนึ่ง
+--   planned   -> จองไว้ล่วงหน้า ยังไม่ถึงวัน แก้ไขได้เต็มที่
+--   playing   -> กำลังเล่นอยู่ (มีได้ทีละวันต่อก๊วน)
+--   done      -> จบแล้ว ยอดเงิน/สถิติถูก freeze ไว้ใน final_* ไม่คำนวณสดอีก
+--   cancelled -> จองไว้แล้วไม่ได้ไป
+--
+-- venue_name / shuttle_brand_name เก็บ snapshot ไว้ เผื่อ master ถูกลบ
+-- (หลักการเดียวกับ matches.court_name และ match_players.player_name)
+-- ------------------------------------------------------------
 create table sessions (
-  id            uuid primary key default gen_random_uuid(),
-  owner_id      uuid not null references auth.users(id) on delete cascade,
-  name          text not null default 'ก๊วนแบด',
+  id                 uuid primary key default gen_random_uuid(),
+  club_id            uuid not null references clubs(id) on delete cascade,
+
+  venue_id           uuid references venues(id) on delete set null,
+  venue_name         text,
+  shuttle_brand_id   uuid references shuttle_brands(id) on delete set null,
+  shuttle_model_id   uuid references shuttle_models(id) on delete set null,
+  shuttle_brand_name text,   -- snapshot "ยี่ห้อ รุ่น" รวมกัน ไว้แสดงผลเผื่อ master ถูกลบ
+
+  play_date          date not null,
+  start_time         time,
+  end_time           time,
+  status             text not null default 'planned'
+                       check (status in ('planned', 'playing', 'done', 'cancelled')),
+  note               text,
+
   -- ค่าสนาม = ชั่วโมงรวมของทุกคอร์ต (courts.hours) × hourly_rate
-  hourly_rate   numeric(10,2) not null default 0 check (hourly_rate >= 0),
+  hourly_rate        numeric(10,2) not null default 0 check (hourly_rate >= 0),
   -- ค่าลูก = shuttle_count × shuttle_price
-  shuttle_price numeric(10,2) not null default 0 check (shuttle_price >= 0),
-  shuttle_count int           not null default 0 check (shuttle_count >= 0),
+  shuttle_price      numeric(10,2) not null default 0 check (shuttle_price >= 0),
+  shuttle_count      int           not null default 0 check (shuttle_count >= 0),
+
   -- วิธีเลือกผู้เล่นลงคอร์ต — logic จริงอยู่ใน src/utils/pairing.js
-  queue_mode    text not null default 'sequential'
-                  check (queue_mode in ('sequential', 'rotate')),
-  closed_at     timestamptz,
-  -- ยอดที่ freeze ไว้ตอนปิดก๊วน (null ระหว่างที่ยังเปิดอยู่)
+  queue_mode         text not null default 'sequential'
+                       check (queue_mode in ('sequential', 'rotate')),
+
+  closed_at          timestamptz,
+  -- ยอดที่ freeze ไว้ตอนจบวัน (null จนกว่าจะกดจบ)
   final_total_hours   numeric(10,2),
   final_court_total   numeric(12,2),
   final_shuttle_total numeric(12,2),
@@ -69,80 +271,96 @@ create table sessions (
   final_player_count  int,
   final_game_count    int,
   final_play_minutes  int,
-  created_at    timestamptz not null default now(),
-  updated_at    timestamptz not null default now()
+
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now()
 );
 
-create index idx_sessions_owner_open on sessions(owner_id, closed_at);
+create index idx_sessions_club_date on sessions(club_id, play_date desc);
+create index idx_sessions_club_status on sessions(club_id, status);
+
+-- หนึ่งก๊วนมี "วันที่กำลังเล่น" ได้ทีละวันเดียว
+-- (แทนกฎเดิม "1 ผู้ใช้เปิดได้ทีละก๊วน" ซึ่งจำกัดผิดที่)
+create unique index uq_one_playing_day_per_club
+  on sessions(club_id)
+  where status = 'playing';
 
 create trigger trg_sessions_updated_at
   before update on sessions
   for each row execute function set_updated_at();
 
 
--- ============================================================
--- 2. players  — แทน state `players` เดิม
--- ============================================================
+-- ------------------------------------------------------------
+-- players — คนที่อยู่ในวันเล่นนั้น (snapshot ชื่อ/มือจาก members)
+--   waiting  -> รออยู่ในคิว
+--   playing  -> อยู่ในคอร์ตแล้ว (รวมแมตช์ที่ยัง pending ไม่ได้กดเริ่ม)
+--   resting  -> พักชั่วคราว ไม่เข้าคิว แต่ยังร่วมจ่าย
+--   absent   -> ลงชื่อไว้ล่วงหน้าแต่วันจริงไม่มา ไม่เข้าคิว "และไม่นับเป็นคนหารเงิน"
+-- ------------------------------------------------------------
 create table players (
-  id            uuid primary key default gen_random_uuid(),
-  session_id    uuid not null references sessions(id) on delete cascade,
+  id           uuid primary key default gen_random_uuid(),
+  session_id   uuid not null references sessions(id) on delete cascade,
   -- null ได้ = แขกขาจรที่ไม่ได้เก็บเป็นสมาชิก
-  member_id     uuid references members(id) on delete set null,
-  name          text not null check (char_length(trim(name)) > 0),
-  skill         smallint not null default 2 check (skill between 1 and 3),
-  status        text not null default 'waiting'
-                  check (status in ('waiting', 'resting', 'playing')),
-  games_played  int not null default 0 check (games_played >= 0),
-  paying        boolean not null default true,
-  -- แทน queuedAt เดิม: ใช้เลขรันแทน timestamp เพื่อกันชนกันเวลาเรียงคิว
-  queue_seq     bigserial,
-  created_at    timestamptz not null default now(),
-  updated_at    timestamptz not null default now()
+  member_id    uuid references members(id) on delete set null,
+  name         text not null check (char_length(trim(name)) > 0),
+  skill        smallint not null default 2 check (skill between 1 and 3),
+  status       text not null default 'waiting'
+                 check (status in ('waiting', 'resting', 'playing', 'absent')),
+  games_played int not null default 0 check (games_played >= 0),
+  paying       boolean not null default true,
+  -- ลำดับคิว: ใช้เลขรัน ไม่ใช่ timestamp เพื่อกันค่าชนกันเวลาเรียง
+  queue_seq    bigserial,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
 );
 
 create index idx_players_session on players(session_id);
 create index idx_players_session_status on players(session_id, status);
 create index idx_players_member on players(member_id);
 
+-- สมาชิกคนเดิมลงชื่อซ้ำในวันเดียวกันไม่ได้ (แขกที่ member_id null ไม่ถูกจำกัด)
+create unique index uq_player_once_per_day
+  on players(session_id, member_id)
+  where member_id is not null;
+
 create trigger trg_players_updated_at
   before update on players
   for each row execute function set_updated_at();
 
 
--- ============================================================
--- 3. courts  — แทน state `courts` เดิม
--- ============================================================
+-- ------------------------------------------------------------
+-- courts — คอร์ตที่จองไว้ในวันนั้น 1 แถว = 1 การจอง
+-- จอง 2 คอร์ต คอร์ตแรก 3 ชม. คอร์ตสอง 2 ชม. ก็เก็บคนละค่าได้
+-- ------------------------------------------------------------
 create table courts (
-  id            uuid primary key default gen_random_uuid(),
-  session_id    uuid not null references sessions(id) on delete cascade,
-  name          text not null,
-  sort_order    int not null default 0,
-  -- 1 แถวคอร์ต = 1 การจอง จึงเก็บชั่วโมงที่จองไว้ที่นี่
-  -- (จอง 2 สนาม สนามแรก 3 ชม. สนามสอง 2 ชม. ก็เก็บคนละค่าได้)
-  hours         numeric(5,2) not null default 0 check (hours >= 0),
-  created_at    timestamptz not null default now()
+  id         uuid primary key default gen_random_uuid(),
+  session_id uuid not null references sessions(id) on delete cascade,
+  name       text not null,
+  sort_order int not null default 0,
+  hours      numeric(5,2) not null default 0 check (hours >= 0),
+  created_at timestamptz not null default now()
 );
 
 create index idx_courts_session on courts(session_id);
 
 
--- ============================================================
--- 4. matches — 1 แถว = 1 เกม
---    pending -> จับคู่แล้วแต่ยังไม่กดเริ่ม (สลับตัวได้ ยังไม่จับเวลา)
---    playing -> กำลังเล่น (started_at เริ่มนับตรงนี้)
---    done    -> จบแล้ว -> กลายเป็นประวัติ (MatchHistory)
---    ended_at IS NULL ทั้ง pending และ playing = คอร์ตนั้นไม่ว่าง
--- ============================================================
+-- ------------------------------------------------------------
+-- matches — 1 แถว = 1 เกม
+--   pending -> จับคู่แล้วแต่ยังไม่กดเริ่ม (สลับตัวได้ ยังไม่จับเวลา)
+--   playing -> กำลังเล่น (started_at เริ่มนับตรงนี้)
+--   done    -> จบแล้ว -> กลายเป็นประวัติ
+--   ended_at is null ทั้ง pending และ playing = คอร์ตนั้นไม่ว่าง
+-- ------------------------------------------------------------
 create table matches (
-  id            uuid primary key default gen_random_uuid(),
-  session_id    uuid not null references sessions(id) on delete cascade,
-  court_id      uuid references courts(id) on delete set null,
-  court_name    text not null,  -- snapshot ชื่อคอร์ต เผื่อคอร์ตถูกลบภายหลัง
-  status        text not null default 'pending'
-                  check (status in ('pending', 'playing', 'done')),
-  started_at    timestamptz,    -- null ระหว่าง pending
-  ended_at      timestamptz,
-  created_at    timestamptz not null default now()
+  id         uuid primary key default gen_random_uuid(),
+  session_id uuid not null references sessions(id) on delete cascade,
+  court_id   uuid references courts(id) on delete set null,
+  court_name text not null,  -- snapshot เผื่อคอร์ตถูกลบภายหลัง
+  status     text not null default 'pending'
+               check (status in ('pending', 'playing', 'done')),
+  started_at timestamptz,    -- null ระหว่าง pending
+  ended_at   timestamptz,
+  created_at timestamptz not null default now()
 );
 
 create index idx_matches_session on matches(session_id);
@@ -155,32 +373,100 @@ create unique index uq_one_active_match_per_court
   where ended_at is null;
 
 
--- ============================================================
--- 5. match_players — junction: ผู้เล่นแต่ละคนในแต่ละแมตช์ + ทีม
---    เก็บ snapshot ชื่อ/สกิล ไว้ด้วย เผื่อผู้เล่นถูกลบภายหลัง
---    ประวัติการแข่งขันจะยังแสดงชื่อได้ครบเหมือนเดิม
--- ============================================================
+-- ------------------------------------------------------------
+-- match_players — ผู้เล่นแต่ละคนในแต่ละแมตช์ + ทีม
+-- เก็บ snapshot ชื่อ/มือ ประวัติจึงอยู่รอดแม้ผู้เล่นถูกลบ
+-- ------------------------------------------------------------
 create table match_players (
-  id            uuid primary key default gen_random_uuid(),
-  match_id      uuid not null references matches(id) on delete cascade,
-  player_id     uuid references players(id) on delete set null,
-  player_name   text not null,
-  skill         smallint not null check (skill between 1 and 3),
-  team          text not null check (team in ('A', 'B')),
-  created_at    timestamptz not null default now()
+  id          uuid primary key default gen_random_uuid(),
+  match_id    uuid not null references matches(id) on delete cascade,
+  player_id   uuid references players(id) on delete set null,
+  player_name text not null,
+  skill       smallint not null check (skill between 1 and 3),
+  team        text not null check (team in ('A', 'B')),
+  created_at  timestamptz not null default now()
 );
 
 create index idx_match_players_match on match_players(match_id);
 create index idx_match_players_player on match_players(player_id);
 
--- ผู้เล่นคนเดียวกันลงซ้ำในแมตช์เดียวกันไม่ได้
 create unique index uq_match_player_once
   on match_players(match_id, player_id)
   where player_id is not null;
 
 
 -- ============================================================
--- Views — ให้ตรงกับ logic เดิมใน pairing.js / component ต่างๆ
+-- Helper: ตรวจสิทธิ์
+-- ------------------------------------------------------------
+-- ทุกตัวเป็น SECURITY DEFINER จึงอ่าน club_access ได้โดยไม่ติด RLS
+-- ของตัวเอง — จำเป็น ไม่งั้น policy ของ club_access จะวนซ้ำไม่รู้จบ
+-- ============================================================
+
+create or replace function can_view_club(p_club_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from club_access
+    where club_id = p_club_id and user_id = auth.uid()
+  );
+$$;
+
+create or replace function can_edit_club(p_club_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from club_access
+    where club_id = p_club_id and user_id = auth.uid()
+      and role in ('owner', 'editor')
+  );
+$$;
+
+create or replace function is_club_owner(p_club_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from club_access
+    where club_id = p_club_id and user_id = auth.uid() and role = 'owner'
+  );
+$$;
+
+create or replace function can_view_session(p_session_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from sessions s
+    join club_access a on a.club_id = s.club_id
+    where s.id = p_session_id and a.user_id = auth.uid()
+  );
+$$;
+
+create or replace function can_edit_session(p_session_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from sessions s
+    join club_access a on a.club_id = s.club_id
+    where s.id = p_session_id and a.user_id = auth.uid()
+      and a.role in ('owner', 'editor')
+  );
+$$;
+
+-- master ของใครคนหนึ่ง: เจ้าตัวแก้ได้ ส่วนคนที่ถูกแชร์ก๊วนของเขามาจะอ่านได้
+-- (ต้องอ่านได้ ไม่งั้นเลือกผู้เล่น/สนาม ตอนจัดวันเล่นไม่ได้)
+create or replace function has_master_access(p_owner_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select p_owner_id = auth.uid() or exists (
+    select 1 from clubs c
+    join club_access a on a.club_id = c.id
+    where c.owner_id = p_owner_id and a.user_id = auth.uid()
+  );
+$$;
+
+grant execute on function can_view_club(uuid)     to authenticated;
+grant execute on function can_edit_club(uuid)     to authenticated;
+grant execute on function is_club_owner(uuid)     to authenticated;
+grant execute on function can_view_session(uuid)  to authenticated;
+grant execute on function can_edit_session(uuid)  to authenticated;
+grant execute on function has_master_access(uuid) to authenticated;
+
+
+-- ============================================================
+-- Views
 -- ============================================================
 
 -- คิวรอลงคอร์ต: เรียงตาม games_played แล้ว queue_seq (เหมือน pickNextMatch)
@@ -190,22 +476,23 @@ from players
 where status = 'waiting'
 order by session_id, games_played, queue_seq;
 
--- สถานะคอร์ต + แมตช์ที่กำลังเล่นอยู่ (ถ้ามี) — แทน CourtBoard
+-- สถานะคอร์ต + แมตช์ที่ยังไม่จบ (ถ้ามี)
 create or replace view v_court_board as
 select
-  c.id            as court_id,
+  c.id         as court_id,
   c.session_id,
-  c.name          as court_name,
+  c.name       as court_name,
   c.sort_order,
-  m.id            as match_id,
-  m.status        as match_status,
+  c.hours,
+  m.id         as match_id,
+  m.status     as match_status,
   m.started_at
 from courts c
 left join matches m
   on m.court_id = c.id and m.ended_at is null
 order by c.session_id, c.sort_order;
 
--- ประวัติการแข่งขัน พร้อมชื่อผู้เล่นสองทีม — แทน MatchHistory
+-- ประวัติการแข่งขัน พร้อมชื่อผู้เล่นสองทีม
 create or replace view v_match_history as
 select
   m.id,
@@ -221,9 +508,9 @@ where m.ended_at is not null
 group by m.id
 order by m.ended_at desc;
 
--- สรุปค่าใช้จ่ายต่อคน — แทน BillingPanel
--- ยอดรวมมาจากชั่วโมงจริงของแต่ละคอร์ต + จำนวนลูกที่ใช้
--- แต่ยังหารเท่ากันทุกคนที่ร่วมจ่าย (ไม่หารตามจำนวนเกม)
+-- สรุปค่าใช้จ่ายต่อคนของวันเล่น
+-- หารเท่ากันทุกคนที่ "มา" และร่วมจ่าย — ไม่หารตามจำนวนเกมหรือนาที
+-- คนที่ status = 'absent' ไม่ถูกนับเป็นตัวหาร (ลงชื่อไว้แต่ไม่ได้มา)
 create or replace view v_billing_summary as
 with court_totals as (
   select session_id, coalesce(sum(hours), 0) as total_hours
@@ -231,7 +518,7 @@ with court_totals as (
   group by session_id
 ),
 payer_totals as (
-  select session_id, count(*) filter (where paying) as payer_count
+  select session_id, count(*) filter (where paying and status <> 'absent') as payer_count
   from players
   group by session_id
 )
@@ -256,16 +543,16 @@ from sessions s
 left join court_totals c on c.session_id = s.id
 left join payer_totals p on p.session_id = s.id;
 
--- สถิติรายคนในก๊วน: เล่นกี่เกม กี่นาที (นับเฉพาะแมตช์ที่จบแล้ว)
+-- สถิติรายคนในวันเล่น: กี่เกม กี่นาที (นับเฉพาะแมตช์ที่จบแล้ว)
 -- คนที่ถูกสลับตัวออกก่อนเริ่มไม่มีแถวใน match_players จึงไม่ถูกนับเอง
 create or replace view v_session_player_stats as
 select
-  p.id                as player_id,
+  p.id         as player_id,
   p.session_id,
   p.name,
   p.status,
   p.paying,
-  count(m.id)                                                          as games,
+  count(m.id)                                                           as games,
   coalesce(sum(extract(epoch from (m.ended_at - m.started_at))), 0) / 60 as minutes
 from players p
 left join match_players mp on mp.player_id = p.id
@@ -275,12 +562,13 @@ left join matches m
  and m.started_at is not null
 group by p.id;
 
--- สรุปภาพรวมของก๊วน
+-- สรุปภาพรวมของวันเล่น (player_count นับเฉพาะคนที่มาจริง)
 create or replace view v_session_summary as
 select
   s.id as session_id,
-  (select count(*) from players p where p.session_id = s.id)               as player_count,
-  (select count(*) from courts c where c.session_id = s.id)                as court_count,
+  (select count(*) from players p where p.session_id = s.id and p.status <> 'absent') as player_count,
+  (select count(*) from players p where p.session_id = s.id and p.status =  'absent') as absent_count,
+  (select count(*) from courts c where c.session_id = s.id)                  as court_count,
   (select coalesce(sum(c.hours), 0) from courts c where c.session_id = s.id) as booked_hours,
   (select count(*) from matches m where m.session_id = s.id and m.status = 'done') as finished_games,
   (select coalesce(sum(extract(epoch from (m.ended_at - m.started_at))), 0) / 60
@@ -305,152 +593,217 @@ join matches m on m.id = a.match_id
 where m.status = 'done'
 group by m.session_id, a.player_id, b.player_id;
 
--- รายการก๊วนที่ปิดไปแล้ว พร้อมยอดที่ freeze ไว้ (ไม่คำนวณสดใหม่)
-create or replace view v_session_archive as
+-- รายการวันเล่นของก๊วน — ใช้ทั้งหน้า "ที่จะเล่น" และ "ที่เล่นไปแล้ว"
+-- วันที่จบแล้วอ่านยอดจาก final_* เท่านั้น ไม่คำนวณสดซ้ำ
+-- (ถ้าคำนวณสด พอแก้เรทค่าสนามทีหลัง ยอดของวันเก่าจะเปลี่ยนตามทั้งที่จ่ายกันไปแล้ว)
+create or replace view v_club_days as
 select
-  s.id,
-  s.owner_id,
-  s.name,
-  s.created_at,
+  s.id as session_id,
+  s.club_id,
+  s.play_date,
+  s.start_time,
+  s.end_time,
+  s.status,
+  s.venue_name,
+  s.shuttle_brand_name,
   s.closed_at,
-  s.final_total_hours,
-  s.final_court_total,
-  s.final_shuttle_total,
-  s.final_total_fee,
-  s.final_payer_count,
-  s.final_per_person,
-  s.final_player_count,
-  s.final_game_count,
-  s.final_play_minutes
+  case when s.status = 'done' then s.final_total_fee    else b.total_fee    end as total_fee,
+  case when s.status = 'done' then s.final_per_person   else b.per_person   end as per_person,
+  case when s.status = 'done' then s.final_total_hours  else b.total_hours  end as total_hours,
+  case when s.status = 'done' then s.final_player_count else sm.player_count end as player_count,
+  case when s.status = 'done' then s.final_game_count   else sm.finished_games end as game_count,
+  case when s.status = 'done' then s.final_play_minutes else round(sm.total_play_minutes) end as play_minutes
 from sessions s
-where s.closed_at is not null
-order by s.closed_at desc;
+left join v_billing_summary b on b.session_id = s.id
+left join v_session_summary sm on sm.session_id = s.id
+order by s.play_date desc, s.created_at desc;
 
--- สถิติสมาชิกข้ามทุกก๊วน
+-- สถิติสมาชิกข้ามทุกก๊วน (นับเฉพาะวันที่จบแล้ว และเฉพาะวันที่มาจริง)
 create or replace view v_member_stats as
 select
-  mb.id           as member_id,
+  mb.id      as member_id,
   mb.owner_id,
   mb.name,
   mb.default_skill,
+  mb.note,
   mb.active,
-  count(distinct p.session_id)     as sessions_played,
-  coalesce(sum(p.games_played), 0) as total_games,
+  -- นับเฉพาะวันที่ join ติด (s.status = 'done') ไม่ใช่ทุกวันที่ลงชื่อไว้
+  count(distinct s.id)                                      as days_played,
+  coalesce(sum(p.games_played) filter (where s.id is not null), 0) as total_games,
   (
     select round(coalesce(sum(extract(epoch from (m.ended_at - m.started_at))), 0) / 60)
     from players p2
     join match_players mp on mp.player_id = p2.id
     join matches m on m.id = mp.match_id and m.status = 'done' and m.started_at is not null
     where p2.member_id = mb.id
-  )                                as total_minutes,
-  max(s.created_at)                as last_played_at
+  ) as total_minutes,
+  max(s.play_date) as last_played_on
 from members mb
-left join players p on p.member_id = mb.id
-left join sessions s on s.id = p.session_id
+left join players p on p.member_id = mb.id and p.status <> 'absent'
+left join sessions s on s.id = p.session_id and s.status = 'done'
 group by mb.id;
+
+-- ก๊วนที่ฉันเข้าถึงได้ พร้อมบทบาทและวันเล่นล่าสุด/ถัดไป
+create or replace view v_my_clubs as
+select
+  c.id,
+  c.owner_id,
+  c.name,
+  c.note,
+  c.active,
+  c.created_at,
+  a.role,
+  (c.owner_id = auth.uid()) as is_mine,
+  (select count(*) from sessions s where s.club_id = c.id and s.status = 'done')    as done_days,
+  (select count(*) from sessions s where s.club_id = c.id and s.status = 'planned') as planned_days,
+  (select s.id from sessions s where s.club_id = c.id and s.status = 'playing' limit 1) as playing_session_id,
+  (select max(s.play_date) from sessions s where s.club_id = c.id and s.status = 'done') as last_played_on,
+  (select min(s.play_date) from sessions s
+    where s.club_id = c.id and s.status = 'planned' and s.play_date >= current_date) as next_play_date
+from clubs c
+join club_access a on a.club_id = c.id and a.user_id = auth.uid();
+
+-- หมายเหตุ: รายชื่อ "คนที่แชร์ก๊วนด้วยกัน" พร้อมอีเมล ทำเป็น view ไม่ได้
+-- เพราะ security_invoker จะทำให้ต้องมีสิทธิ์อ่าน auth.users ซึ่ง role
+-- authenticated ไม่มี — ใช้ RPC list_club_members() ใน functions.sql แทน
 
 -- view รันด้วยสิทธิ์เจ้าของ view เป็นค่าเริ่มต้น ซึ่งข้าม RLS
 -- เปิด security_invoker ให้ใช้สิทธิ์ของคนเรียกแทน RLS จึงมีผลจริง
-alter view v_waiting_queue          set (security_invoker = on);
-alter view v_court_board            set (security_invoker = on);
-alter view v_match_history          set (security_invoker = on);
-alter view v_billing_summary        set (security_invoker = on);
-alter view v_session_player_stats   set (security_invoker = on);
-alter view v_session_summary        set (security_invoker = on);
-alter view v_pair_history           set (security_invoker = on);
-alter view v_session_archive        set (security_invoker = on);
-alter view v_member_stats           set (security_invoker = on);
+-- *** view ใหม่ทุกตัวต้องตั้งค่านี้เสมอ ***
+alter view v_waiting_queue        set (security_invoker = on);
+alter view v_court_board          set (security_invoker = on);
+alter view v_match_history        set (security_invoker = on);
+alter view v_billing_summary      set (security_invoker = on);
+alter view v_session_player_stats set (security_invoker = on);
+alter view v_session_summary      set (security_invoker = on);
+alter view v_pair_history         set (security_invoker = on);
+alter view v_club_days            set (security_invoker = on);
+alter view v_member_stats         set (security_invoker = on);
+alter view v_my_clubs             set (security_invoker = on);
 
 
 -- ============================================================
--- Row Level Security — เห็น/แก้ได้เฉพาะก๊วนของตัวเอง
--- (ถ้าไม่ต้องการระบบ auth/หลายผู้ใช้ ลบ block นี้ทิ้งได้เลย)
+-- Row Level Security
+-- ------------------------------------------------------------
+-- ข้อมูลรายวันทุกตารางตัดสินสิทธิ์ผ่าน club_access ไม่ใช่ owner_id ตรงๆ
+-- เพราะก๊วนแชร์ให้คนอื่นดู/แก้ได้
 -- ============================================================
-alter table members enable row level security;
-alter table sessions enable row level security;
-alter table players enable row level security;
-alter table courts enable row level security;
-alter table matches enable row level security;
-alter table match_players enable row level security;
+alter table clubs          enable row level security;
+alter table club_access    enable row level security;
+alter table members        enable row level security;
+alter table venues         enable row level security;
+alter table shuttle_brands enable row level security;
+alter table shuttle_models enable row level security;
+alter table sessions       enable row level security;
+alter table players        enable row level security;
+alter table courts         enable row level security;
+alter table matches        enable row level security;
+alter table match_players  enable row level security;
 
-create policy "owner can manage own members"
-  on members for all
-  using (owner_id = auth.uid())
-  with check (owner_id = auth.uid());
+-- ---------- clubs ----------
+create policy "view accessible clubs" on clubs
+  for select using (can_view_club(id));
 
-create policy "owner can manage own sessions"
-  on sessions for all
-  using (owner_id = auth.uid())
-  with check (owner_id = auth.uid());
+-- ตั้งใจไม่มี policy insert: สร้างก๊วนต้องผ่าน create_club() เท่านั้น
+-- ถ้า insert ตรงๆ ได้ จะเกิดก๊วนที่ไม่มีแถวใน club_access = เจ้าของเองก็มองไม่เห็น
 
-create policy "owner can manage own players"
-  on players for all
-  using (session_id in (select id from sessions where owner_id = auth.uid()))
-  with check (session_id in (select id from sessions where owner_id = auth.uid()));
+create policy "owner updates club" on clubs
+  for update using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
-create policy "owner can manage own courts"
-  on courts for all
-  using (session_id in (select id from sessions where owner_id = auth.uid()))
-  with check (session_id in (select id from sessions where owner_id = auth.uid()));
+create policy "owner deletes club" on clubs
+  for delete using (owner_id = auth.uid());
 
-create policy "owner can manage own matches"
-  on matches for all
-  using (session_id in (select id from sessions where owner_id = auth.uid()))
-  with check (session_id in (select id from sessions where owner_id = auth.uid()));
+-- ---------- club_access ----------
+-- เห็นแถวของตัวเอง หรือทุกแถวถ้าเป็นเจ้าของก๊วน
+create policy "view club access" on club_access
+  for select using (user_id = auth.uid() or is_club_owner(club_id));
 
-create policy "owner can manage own match_players"
-  on match_players for all
-  using (match_id in (
-    select m.id from matches m
-    join sessions s on s.id = m.session_id
-    where s.owner_id = auth.uid()
+-- เพิ่ม/ลบคนเข้าก๊วนทำผ่าน RPC เท่านั้น (grant_club_access / revoke_club_access)
+-- แต่เปิดให้เจ้าของลบได้ตรงๆ เผื่อจัดการจากหน้าตั้งค่า
+create policy "owner removes club access" on club_access
+  for delete using (is_club_owner(club_id) and user_id <> auth.uid());
+
+-- ---------- master: เจ้าตัวแก้ได้ คนที่ถูกแชร์ก๊วนมาอ่านได้ ----------
+create policy "manage own members" on members
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+create policy "shared can read members" on members
+  for select using (has_master_access(owner_id));
+
+create policy "manage own venues" on venues
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+create policy "shared can read venues" on venues
+  for select using (has_master_access(owner_id));
+
+create policy "manage own shuttle brands" on shuttle_brands
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+create policy "shared can read shuttle brands" on shuttle_brands
+  for select using (has_master_access(owner_id));
+
+-- shuttle_models ไม่มี owner_id ของตัวเอง ตัดสินสิทธิ์ผ่านยี่ห้อแม่
+create policy "manage own shuttle models" on shuttle_models
+  for all
+  using (exists (
+    select 1 from shuttle_brands b where b.id = brand_id and b.owner_id = auth.uid()
   ))
-  with check (match_id in (
-    select m.id from matches m
-    join sessions s on s.id = m.session_id
-    where s.owner_id = auth.uid()
+  with check (exists (
+    select 1 from shuttle_brands b where b.id = brand_id and b.owner_id = auth.uid()
   ));
 
+create policy "shared can read shuttle models" on shuttle_models
+  for select
+  using (exists (
+    select 1 from shuttle_brands b where b.id = brand_id and has_master_access(b.owner_id)
+  ));
+
+-- ---------- รายวัน ----------
+create policy "view club sessions" on sessions
+  for select using (can_view_club(club_id));
+
+create policy "edit club sessions" on sessions
+  for insert with check (can_edit_club(club_id));
+
+create policy "update club sessions" on sessions
+  for update using (can_edit_club(club_id)) with check (can_edit_club(club_id));
+
+create policy "delete club sessions" on sessions
+  for delete using (can_edit_club(club_id));
+
+create policy "view players" on players
+  for select using (can_view_session(session_id));
+
+create policy "edit players" on players
+  for all using (can_edit_session(session_id)) with check (can_edit_session(session_id));
+
+create policy "view courts" on courts
+  for select using (can_view_session(session_id));
+
+create policy "edit courts" on courts
+  for all using (can_edit_session(session_id)) with check (can_edit_session(session_id));
+
+create policy "view matches" on matches
+  for select using (can_view_session(session_id));
+
+create policy "edit matches" on matches
+  for all using (can_edit_session(session_id)) with check (can_edit_session(session_id));
+
+create policy "view match players" on match_players
+  for select using (
+    exists (select 1 from matches m where m.id = match_id and can_view_session(m.session_id))
+  );
+
+create policy "edit match players" on match_players
+  for all using (
+    exists (select 1 from matches m where m.id = match_id and can_edit_session(m.session_id))
+  )
+  with check (
+    exists (select 1 from matches m where m.id = match_id and can_edit_session(m.session_id))
+  );
+
 
 -- ============================================================
--- (แนะนำ) เปิด Realtime เพื่อให้หลายอุปกรณ์เห็นคิว/คอร์ตอัปเดตพร้อมกัน
+-- (ต้องทำ) เปิด Realtime ใน Dashboard เพื่อให้หลายอุปกรณ์เห็นตรงกัน
 -- ============================================================
--- alter publication supabase_realtime add table players, courts, matches, match_players;
-
-
--- ============================================================
--- get_or_create_my_session()
--- ------------------------------------------------------------
--- คืน session_id ของก๊วนที่ "ยังเปิดอยู่" (closed_at is null)
--- ถ้าไม่มีจะสร้างใหม่พร้อมคอร์ตแรกให้เลย
--- ก๊วนที่ปิดแล้วจะไม่ถูกหยิบกลับมา — ดูย้อนหลังผ่าน v_session_archive
---
--- ฝั่งแอป: เรียกครั้งเดียวหลัง login และเรียกซ้ำหลังปิด/เปิดก๊วน
--- ============================================================
-create or replace function get_or_create_my_session()
-returns uuid
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_session_id uuid;
-begin
-  select id into v_session_id
-  from sessions
-  where owner_id = auth.uid() and closed_at is null
-  order by created_at desc
-  limit 1;
-
-  if v_session_id is null then
-    insert into sessions (owner_id)
-    values (auth.uid())
-    returning id into v_session_id;
-
-    insert into courts (session_id, name, sort_order)
-    values (v_session_id, 'คอร์ต 1', 0);
-  end if;
-
-  return v_session_id;
-end;
-$$;
+-- alter publication supabase_realtime add table players, courts, matches, match_players, sessions;

@@ -12,15 +12,21 @@ const STATUS_LABEL = {
   waiting: 'รอคิว',
   playing: 'อยู่ในคอร์ต',
   resting: 'พัก',
+  absent: 'ไม่มา',
 }
 
 export default function SessionStats({ players, summary }) {
-  if (players.length === 0) {
-    return <p className="empty-state small">ยังไม่มีผู้เล่น</p>
+  // คนที่ไม่มาไม่นับในสถิติ — ให้ตรงกับ summary.playerCount ที่มาจาก
+  // v_session_summary ซึ่งตัด absent ออกแล้ว ไม่งั้นตัวเลขสองที่ในหน้าเดียวกันจะขัดกัน
+  const present = players.filter((p) => p.status !== 'absent')
+  const absentCount = players.length - present.length
+
+  if (present.length === 0) {
+    return <p className="empty-state small">ยังไม่มีผู้เล่นที่มา</p>
   }
 
   // เล่นเยอะสุดขึ้นก่อน คนที่ยังไม่ได้ลงเลยจะไปอยู่ท้ายสุด
-  const ranked = [...players].sort(
+  const ranked = [...present].sort(
     (a, b) => b.gamesPlayed - a.gamesPlayed || b.minutesPlayed - a.minutesPlayed
   )
   const maxGames = ranked[0]?.gamesPlayed ?? 0
@@ -47,6 +53,12 @@ export default function SessionStats({ players, summary }) {
             <span className="stat-label">เวลาเล่นรวมทุกคอร์ต</span>
           </div>
         </div>
+      )}
+
+      {absentCount > 0 && (
+        <p className="stats-note">
+          มีอีก {absentCount} คนที่ลงชื่อไว้แต่ไม่มา — ไม่ถูกนับทั้งในสถิติและในการหารค่าใช้จ่าย
+        </p>
       )}
 
       {maxGames - minGames >= 2 && (
