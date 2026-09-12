@@ -861,3 +861,10 @@ create policy "edit match players" on match_players
 -- (ต้องทำ) เปิด Realtime ใน Dashboard เพื่อให้หลายอุปกรณ์เห็นตรงกัน
 -- ============================================================
 -- alter publication supabase_realtime add table players, courts, matches, match_players, sessions;
+
+-- ฝั่งแอป subscribe แบบมี filter (session_id=eq.…) ซึ่ง payload ของ DELETE
+-- ตามค่าเริ่มต้นมีแค่คีย์หลัก ไม่มี session_id ให้ filter เทียบ event ลบจึงหาย
+-- replica identity full ส่งค่าทุกคอลัมน์ของแถวที่ถูกลบมาด้วย
+alter table players replica identity full;
+alter table courts replica identity full;
+alter table matches replica identity full;
