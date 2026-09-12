@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { SkeletonList } from './Skeleton'
 import { useConfirm } from '../hooks/useConfirm'
+import AsyncButton from './AsyncButton'
 
 const ROLE_LABEL = {
   owner: 'เจ้าของ',
@@ -117,9 +118,8 @@ export default function ClubSharePanel({ clubId, isOwner }) {
               </div>
               {isOwner && r.role !== 'owner' && (
                 <div className="master-row-actions">
-                  <button
+                  <AsyncButton
                     className="btn-ghost btn-danger"
-                    type="button"
                     onClick={async () => {
                       const ok = await confirm({
                         title: 'เอาออกจากก๊วน?',
@@ -131,7 +131,7 @@ export default function ClubSharePanel({ clubId, isOwner }) {
                     }}
                   >
                     เอาออก
-                  </button>
+                  </AsyncButton>
                 </div>
               )}
             </li>

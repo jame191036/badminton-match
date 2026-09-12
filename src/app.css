@@ -988,6 +988,30 @@
 
 .toast-error span { flex: 1; overflow-wrap: break-word; }
 
+/* ---------- ปุ่มที่กำลังรอ server ---------- */
+.btn-spinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  margin-right: 7px;
+  vertical-align: -2px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: auth-spin 0.7s linear infinite;
+}
+
+/* ปุ่มยังอ่านออกตอน disabled เพราะกำลังทำงาน ไม่ใช่เพราะกดไม่ได้ */
+.is-busy:disabled {
+  opacity: 0.85;
+  cursor: progress;
+}
+
+.btn-primary.is-busy:disabled {
+  background: var(--coral);
+  color: #fff;
+}
+
 /* ---------- Skeleton ---------- */
 .skeleton {
   display: block;

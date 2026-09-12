@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { QUEUE_MODES, skillLabel } from '../utils/pairing'
+import AsyncButton from './AsyncButton'
 
 // นาฬิกาเดินตัวเดียวใช้ร่วมกันทุกคอร์ต ดีกว่าให้แต่ละคอร์ตตั้ง interval เอง
 function useNow(active) {
@@ -30,13 +31,13 @@ function TeamSide({ team, label, onSubstitute }) {
           <span>{p.name}</span>
           <span className="team-skill mono">{skillLabel(p.skill)}</span>
           {onSubstitute && (
-            <button
+            <AsyncButton
               className="btn-ghost btn-sub"
               onClick={() => onSubstitute(p.id)}
               title="ยังไม่พร้อม — พักก่อน แล้วให้คนถัดไปในคิวมาแทน"
             >
               พัก
-            </button>
+            </AsyncButton>
           )}
         </div>
       ))}
@@ -73,10 +74,12 @@ export default function CourtBoard({
         <h3>คอร์ต</h3>
         <div className="court-controls">
           {!readOnly && (
-            <button className="btn-ghost" onClick={onRemoveCourt} disabled={courts.length <= 1}>− คอร์ต</button>
+            <AsyncButton onClick={onRemoveCourt} disabled={courts.length <= 1}>
+              − คอร์ต
+            </AsyncButton>
           )}
           <span className="mono">{courts.length} คอร์ต</span>
-          {!readOnly && <button className="btn-ghost" onClick={onAddCourt}>+ คอร์ต</button>}
+          {!readOnly && <AsyncButton onClick={onAddCourt}>+ คอร์ต</AsyncButton>}
         </div>
       </div>
 
@@ -154,24 +157,32 @@ export default function CourtBoard({
                       )}
                       {!readOnly && (
                         <div className="court-actions">
-                          <button
+                          <AsyncButton
                             className="btn-primary"
+                            busyLabel="กำลังเริ่ม..."
                             onClick={() => onStart(court.id)}
                             disabled={playerCount < 4}
                           >
                             เริ่มเกม
-                          </button>
-                          <button className="btn-ghost btn-danger" onClick={() => onCancel(court.id)}>
+                          </AsyncButton>
+                          <AsyncButton
+                            className="btn-ghost btn-danger"
+                            onClick={() => onCancel(court.id)}
+                          >
                             ยกเลิก
-                          </button>
+                          </AsyncButton>
                         </div>
                       )}
                     </>
                   ) : (
                     !readOnly && (
-                      <button className="btn-primary btn-finish" onClick={() => onFinish(court.id)}>
+                      <AsyncButton
+                        className="btn-primary btn-finish"
+                        busyLabel="กำลังจบเกม..."
+                        onClick={() => onFinish(court.id)}
+                      >
                         จบเกม → คืนคิว
-                      </button>
+                      </AsyncButton>
                     )
                   )}
                 </>
@@ -179,14 +190,15 @@ export default function CourtBoard({
                 <>
                   <p className="court-empty-msg">คอร์ตว่าง</p>
                   {!readOnly && (
-                    <button
+                    <AsyncButton
                       className="btn-primary"
+                      busyLabel="กำลังจับคู่..."
                       onClick={() => onAssign(court.id)}
                       disabled={waitingCount < 4}
                       title={waitingCount < 4 ? 'ต้องมีผู้เล่นรอคิวอย่างน้อย 4 คน' : ''}
                     >
                       จับคู่ลงคอร์ต
-                    </button>
+                    </AsyncButton>
                   )}
                 </>
               )}

@@ -10,6 +10,7 @@ import SessionStats from '../components/SessionStats'
 import BillingPanel from '../components/BillingPanel'
 import { SkeletonCourts, SkeletonHead, SkeletonQueue } from '../components/Skeleton'
 import { useConfirm } from '../hooks/useConfirm'
+import AsyncButton from '../components/AsyncButton'
 
 const STATUS_LABEL = {
   planned: 'จองไว้ ยังไม่เริ่ม',
@@ -138,14 +139,18 @@ export default function PlayDayPage() {
           <div className="page-head-actions">
             {!canEdit && <span className="badge badge-shared">ดูได้อย่างเดียว</span>}
             {canEdit && day.status === 'planned' && (
-              <button className="btn-primary" type="button" onClick={() => run(startDay)}>
+              <AsyncButton
+                className="btn-primary"
+                busyLabel="กำลังเริ่ม..."
+                onClick={() => run(startDay)}
+              >
                 เริ่มวันเล่น
-              </button>
+              </AsyncButton>
             )}
             {canEdit && day.status === 'playing' && (
-              <button
+              <AsyncButton
                 className="btn-primary"
-                type="button"
+                busyLabel="กำลังปิดยอด..."
                 onClick={async () => {
                   const ok = await confirm({
                     title: 'จบการเล่นประจำวัน?',
@@ -156,11 +161,11 @@ export default function PlayDayPage() {
                     cancelLabel: 'ยังไม่จบ',
                     danger: Boolean(priceMissing),
                   })
-                  if (ok) run(closeDay)
+                  if (ok) await run(closeDay)
                 }}
               >
                 จบการเล่นประจำวัน
-              </button>
+              </AsyncButton>
             )}
           </div>
         </div>
