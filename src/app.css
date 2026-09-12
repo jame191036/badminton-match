@@ -1509,6 +1509,12 @@
   line-height: 1.55;
 }
 
+/* สลับว่ากำลังดูข้อมูลหลักของใคร (โผล่เฉพาะตอนถูกเชิญไปช่วยจัดก๊วนคนอื่น) */
+.owner-switch { margin-bottom: 18px; }
+.owner-switch .field-label { display: block; margin-bottom: 6px; }
+.owner-switch .auth-tabs { margin-bottom: 8px; }
+.owner-switch .panel-hint { margin-bottom: 0; }
+
 /* tabs: เข้าสู่ระบบ / สมัครสมาชิก */
 .auth-tabs {
   display: flex;

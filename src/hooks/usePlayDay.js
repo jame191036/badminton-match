@@ -31,12 +31,16 @@ function mapDay(row) {
  */
 export function usePlayDay(sessionId) {
   const [day, setDay] = useState(null)
+  const [role, setRole] = useState(null)
   const [billing, setBilling] = useState({ hourlyRate: '', shuttlePrice: '', shuttleCount: '' })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  // error ของการบันทึกราคา/โหมดคิว — เดิมกลืนหายไปเฉยๆ
+  const [saveError, setSaveError] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
 
   const refetch = useCallback(() => setReloadKey((k) => k + 1), [])
+  const clearSaveError = useCallback(() => setSaveError(''), [])
 
   useEffect(() => {
     if (!sessionId) return
@@ -50,8 +54,13 @@ export function usePlayDay(sessionId) {
         .maybeSingle()
 
       if (!alive) return
-      if (err) setError(err.message)
-      else if (data) {
+      if (err) {
+        setError(err.message)
+        setLoading(false)
+        return
+      }
+
+      if (data) {
         setError('')
         setDay(mapDay(data))
         setBilling({
@@ -59,6 +68,17 @@ export function usePlayDay(sessionId) {
           shuttlePrice: data.shuttle_price ? String(data.shuttle_price) : '',
           shuttleCount: data.shuttle_count ? String(data.shuttle_count) : '',
         })
+
+        // บทบาทของเราในก๊วนนี้ — ใช้ตัดสินว่าจะโชว์ปุ่มจัดการหรือไม่
+        // viewer เห็นปุ่มแล้วกดไม่ได้ จะดูเหมือนแอปพัง ทั้งที่ RLS ทำงานถูก
+        const { data: clubRow } = await supabase
+          .from('v_my_clubs')
+          .select('role')
+          .eq('id', data.club_id)
+          .maybeSingle()
+
+        if (!alive) return
+        setRole(clubRow?.role ?? null)
       }
       setLoading(false)
     }
@@ -73,7 +93,7 @@ export function usePlayDay(sessionId) {
     async (next) => {
       setBilling(next) // optimistic ให้พิมพ์ลื่น ค่อยยิงขึ้น server
       if (!sessionId) return
-      await supabase
+      const { error: err } = await supabase
         .from('sessions')
         .update({
           hourly_rate: next.hourlyRate === '' ? 0 : Number(next.hourlyRate),
@@ -81,6 +101,14 @@ export function usePlayDay(sessionId) {
           shuttle_count: next.shuttleCount === '' ? 0 : Number(next.shuttleCount),
         })
         .eq('id', sessionId)
+
+      // ถ้าไม่ดักไว้ ตัวเลขบนจอจะเปลี่ยนตามที่พิมพ์แต่ไม่ได้บันทึกจริง
+      if (err) {
+        console.error(err)
+        setSaveError(`บันทึกราคาไม่สำเร็จ: ${err.message}`)
+      } else {
+        setSaveError('')
+      }
     },
     [sessionId],
   )
@@ -89,7 +117,16 @@ export function usePlayDay(sessionId) {
     async (mode) => {
       setDay((prev) => (prev ? { ...prev, queueMode: mode } : prev))
       if (!sessionId) return
-      await supabase.from('sessions').update({ queue_mode: mode }).eq('id', sessionId)
+      const { error: err } = await supabase
+        .from('sessions')
+        .update({ queue_mode: mode })
+        .eq('id', sessionId)
+      if (err) {
+        console.error(err)
+        setSaveError(`เปลี่ยนโหมดคิวไม่สำเร็จ: ${err.message}`)
+      } else {
+        setSaveError('')
+      }
     },
     [sessionId],
   )
@@ -107,5 +144,20 @@ export function usePlayDay(sessionId) {
     refetch()
   }, [sessionId, refetch])
 
-  return { day, billing, loading, error, updateBilling, updateQueueMode, startDay, closeDay, refetch }
+  return {
+    day,
+    role,
+    // viewer ดูได้อย่างเดียว — ตรงกับ can_edit_session ฝั่ง DB
+    canEdit: role === 'owner' || role === 'editor',
+    billing,
+    loading,
+    error,
+    saveError,
+    clearSaveError,
+    updateBilling,
+    updateQueueMode,
+    startDay,
+    closeDay,
+    refetch,
+  }
 }

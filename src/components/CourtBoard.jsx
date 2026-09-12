@@ -52,6 +52,7 @@ function TeamSide({ team, label, onSubstitute }) {
 
 export default function CourtBoard({
   courts,
+  readOnly = false,
   waitingCount,
   onAssign,
   onStart,
@@ -71,9 +72,11 @@ export default function CourtBoard({
       <div className="court-board-head">
         <h3>คอร์ต</h3>
         <div className="court-controls">
-          <button className="btn-ghost" onClick={onRemoveCourt} disabled={courts.length <= 1}>− คอร์ต</button>
+          {!readOnly && (
+            <button className="btn-ghost" onClick={onRemoveCourt} disabled={courts.length <= 1}>− คอร์ต</button>
+          )}
           <span className="mono">{courts.length} คอร์ต</span>
-          <button className="btn-ghost" onClick={onAddCourt}>+ คอร์ต</button>
+          {!readOnly && <button className="btn-ghost" onClick={onAddCourt}>+ คอร์ต</button>}
         </div>
       </div>
 
@@ -86,6 +89,7 @@ export default function CourtBoard({
               type="button"
               className={`queue-mode-btn ${queueMode === m.value ? 'active' : ''}`}
               aria-pressed={queueMode === m.value}
+              disabled={readOnly}
               onClick={() => onChangeQueueMode(m.value)}
               title={m.hint}
             >
@@ -126,13 +130,17 @@ export default function CourtBoard({
                     <TeamSide
                       team={match.teamA}
                       label="ฝั่ง A"
-                      onSubstitute={isPending ? (pid) => onSubstitute(court.id, pid) : null}
+                      onSubstitute={
+                        isPending && !readOnly ? (pid) => onSubstitute(court.id, pid) : null
+                      }
                     />
                     <div className="vs mono">VS</div>
                     <TeamSide
                       team={match.teamB}
                       label="ฝั่ง B"
-                      onSubstitute={isPending ? (pid) => onSubstitute(court.id, pid) : null}
+                      onSubstitute={
+                        isPending && !readOnly ? (pid) => onSubstitute(court.id, pid) : null
+                      }
                     />
                   </div>
 
@@ -144,36 +152,42 @@ export default function CourtBoard({
                           เพิ่มผู้เล่นใหม่ หรือยกเลิกไปก่อน
                         </p>
                       )}
-                      <div className="court-actions">
-                        <button
-                          className="btn-primary"
-                          onClick={() => onStart(court.id)}
-                          disabled={playerCount < 4}
-                        >
-                          เริ่มเกม
-                        </button>
-                        <button className="btn-ghost btn-danger" onClick={() => onCancel(court.id)}>
-                          ยกเลิก
-                        </button>
-                      </div>
+                      {!readOnly && (
+                        <div className="court-actions">
+                          <button
+                            className="btn-primary"
+                            onClick={() => onStart(court.id)}
+                            disabled={playerCount < 4}
+                          >
+                            เริ่มเกม
+                          </button>
+                          <button className="btn-ghost btn-danger" onClick={() => onCancel(court.id)}>
+                            ยกเลิก
+                          </button>
+                        </div>
+                      )}
                     </>
                   ) : (
-                    <button className="btn-primary btn-finish" onClick={() => onFinish(court.id)}>
-                      จบเกม → คืนคิว
-                    </button>
+                    !readOnly && (
+                      <button className="btn-primary btn-finish" onClick={() => onFinish(court.id)}>
+                        จบเกม → คืนคิว
+                      </button>
+                    )
                   )}
                 </>
               ) : (
                 <>
                   <p className="court-empty-msg">คอร์ตว่าง</p>
-                  <button
-                    className="btn-primary"
-                    onClick={() => onAssign(court.id)}
-                    disabled={waitingCount < 4}
-                    title={waitingCount < 4 ? 'ต้องมีผู้เล่นรอคิวอย่างน้อย 4 คน' : ''}
-                  >
-                    จับคู่ลงคอร์ต
-                  </button>
+                  {!readOnly && (
+                    <button
+                      className="btn-primary"
+                      onClick={() => onAssign(court.id)}
+                      disabled={waitingCount < 4}
+                      title={waitingCount < 4 ? 'ต้องมีผู้เล่นรอคิวอย่างน้อย 4 คน' : ''}
+                    >
+                      จับคู่ลงคอร์ต
+                    </button>
+                  )}
                 </>
               )}
             </div>

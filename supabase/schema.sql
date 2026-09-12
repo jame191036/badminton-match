@@ -457,12 +457,26 @@ returns boolean language sql stable security definer set search_path = public as
   );
 $$;
 
+-- แก้ข้อมูลหลักของ p_owner_id ได้ไหม — ต้องมีบทบาท owner/editor ในก๊วนของเขา
+-- (viewer อ่านได้อย่างเดียว ส่วนสิทธิ์ "ลบ" สงวนไว้ให้เจ้าของคนเดียว)
+create or replace function has_master_edit_access(p_owner_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select p_owner_id = auth.uid() or exists (
+    select 1 from clubs c
+    join club_access a on a.club_id = c.id
+    where c.owner_id = p_owner_id
+      and a.user_id = auth.uid()
+      and a.role in ('owner', 'editor')
+  );
+$$;
+
 grant execute on function can_view_club(uuid)     to authenticated;
 grant execute on function can_edit_club(uuid)     to authenticated;
 grant execute on function is_club_owner(uuid)     to authenticated;
 grant execute on function can_view_session(uuid)  to authenticated;
 grant execute on function can_edit_session(uuid)  to authenticated;
 grant execute on function has_master_access(uuid) to authenticated;
+grant execute on function has_master_edit_access(uuid) to authenticated;
 
 
 -- ============================================================
@@ -723,12 +737,23 @@ create policy "view club access" on club_access
 create policy "owner removes club access" on club_access
   for delete using (is_club_owner(club_id) and user_id <> auth.uid());
 
--- ---------- master: เจ้าตัวแก้ได้ คนที่ถูกแชร์ก๊วนมาอ่านได้ ----------
+-- ---------- master ----------
+-- เจ้าของ: ทำได้ทุกอย่างรวมถึงลบ
+-- คนที่ถูกแชร์ก๊วนมาเป็น owner/editor: อ่าน เพิ่ม และแก้ได้ แต่ "ลบไม่ได้"
+--   (ลบแล้วกู้ไม่ได้ และกระทบทุกก๊วนของเจ้าของ ไม่ใช่แค่ก๊วนที่เขาดูแล)
+-- viewer: อ่านอย่างเดียว
 create policy "manage own members" on members
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
 create policy "shared can read members" on members
   for select using (has_master_access(owner_id));
+
+create policy "shared can add members" on members
+  for insert with check (has_master_edit_access(owner_id));
+
+create policy "shared can update members" on members
+  for update using (has_master_edit_access(owner_id))
+  with check (has_master_edit_access(owner_id));
 
 create policy "manage own venues" on venues
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
@@ -736,11 +761,25 @@ create policy "manage own venues" on venues
 create policy "shared can read venues" on venues
   for select using (has_master_access(owner_id));
 
+create policy "shared can add venues" on venues
+  for insert with check (has_master_edit_access(owner_id));
+
+create policy "shared can update venues" on venues
+  for update using (has_master_edit_access(owner_id))
+  with check (has_master_edit_access(owner_id));
+
 create policy "manage own shuttle brands" on shuttle_brands
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
 create policy "shared can read shuttle brands" on shuttle_brands
   for select using (has_master_access(owner_id));
+
+create policy "shared can add shuttle brands" on shuttle_brands
+  for insert with check (has_master_edit_access(owner_id));
+
+create policy "shared can update shuttle brands" on shuttle_brands
+  for update using (has_master_edit_access(owner_id))
+  with check (has_master_edit_access(owner_id));
 
 -- shuttle_models ไม่มี owner_id ของตัวเอง ตัดสินสิทธิ์ผ่านยี่ห้อแม่
 create policy "manage own shuttle models" on shuttle_models
@@ -756,6 +795,21 @@ create policy "shared can read shuttle models" on shuttle_models
   for select
   using (exists (
     select 1 from shuttle_brands b where b.id = brand_id and has_master_access(b.owner_id)
+  ));
+
+create policy "shared can add shuttle models" on shuttle_models
+  for insert
+  with check (exists (
+    select 1 from shuttle_brands b where b.id = brand_id and has_master_edit_access(b.owner_id)
+  ));
+
+create policy "shared can update shuttle models" on shuttle_models
+  for update
+  using (exists (
+    select 1 from shuttle_brands b where b.id = brand_id and has_master_edit_access(b.owner_id)
+  ))
+  with check (exists (
+    select 1 from shuttle_brands b where b.id = brand_id and has_master_edit_access(b.owner_id)
   ));
 
 -- ---------- รายวัน ----------
