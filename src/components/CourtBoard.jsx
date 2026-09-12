@@ -70,8 +70,9 @@ export default function CourtBoard({
 
   return (
     <div className="court-board">
+      {/* ไม่มีหัวข้อซ้ำตรงนี้ — หน้าที่เรียกใช้ใส่ <h2> ให้แล้ว
+          (ปุ่มเพิ่ม/ลดคอร์ตจึงชิดขวาด้วย justify-content ของกล่องนี้) */}
       <div className="court-board-head">
-        <h3>คอร์ต</h3>
         <div className="court-controls">
           {!readOnly && (
             <AsyncButton onClick={onRemoveCourt} disabled={courts.length <= 1}>

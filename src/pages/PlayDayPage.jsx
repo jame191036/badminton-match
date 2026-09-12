@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { usePlayDay } from '../hooks/usePlayDay'
 import { useBadmintonData } from '../hooks/useBadmintonData'
 import PlayerForm from '../components/PlayerForm'
+import AddPlayersPicker from '../components/AddPlayersPicker'
 import PlayerQueue from '../components/PlayerQueue'
 import CourtBoard from '../components/CourtBoard'
 import MatchHistory from '../components/MatchHistory'
@@ -11,6 +12,18 @@ import BillingPanel from '../components/BillingPanel'
 import { SkeletonCourts, SkeletonHead, SkeletonQueue } from '../components/Skeleton'
 import { useConfirm } from '../hooks/useConfirm'
 import AsyncButton from '../components/AsyncButton'
+import { hoursBetween } from '../utils/date'
+
+// count คืน null = ไม่ต้องโชว์ตัวเลขบนแท็บ
+// แท็บผู้เล่นโชว์ "จำนวนคนที่รอคิว" ไม่ใช่จำนวนคนทั้งหมด เพราะตอนอยู่แท็บคอร์ต
+// สิ่งที่อยากรู้คือยังมีคนพอจับคู่ลงคอร์ตอีกไหม
+const DAY_TABS = [
+  { id: 'board', label: 'คอร์ต', count: (c) => (c.playing > 0 ? c.playing : null) },
+  { id: 'players', label: 'ผู้เล่น', count: (c) => (c.waiting > 0 ? c.waiting : null) },
+  { id: 'billing', label: 'หารเงิน', count: () => null },
+  { id: 'stats', label: 'สถิติ', count: () => null },
+  { id: 'history', label: 'ประวัติ', count: (c) => (c.games > 0 ? c.games : null) },
+]
 
 const STATUS_LABEL = {
   planned: 'จองไว้ ยังไม่เริ่ม',
@@ -29,12 +42,23 @@ function formatThaiDate(value) {
   })
 }
 
+const clock = (t) => (t ? String(t).slice(0, 5) : '')
+
+/** 3 → "3 ชม." / 2.5 → "2 ชม. 30 นาที" */
+function formatHoursLabel(hours) {
+  const whole = Math.floor(hours)
+  const minutes = Math.round((hours - whole) * 60)
+  if (whole === 0) return `${minutes} นาที`
+  return minutes === 0 ? `${whole} ชม.` : `${whole} ชม. ${minutes} นาที`
+}
+
 export default function PlayDayPage() {
   const { clubId, sessionId } = useParams()
   const confirm = useConfirm()
   const {
     day,
     canEdit,
+    ownerId,
     billing,
     loading: dayLoading,
     error: dayError,
@@ -71,7 +95,19 @@ export default function PlayDayPage() {
   } = useBadmintonData(sessionId, day?.queueMode ?? 'sequential')
 
   const [headError, setHeadError] = useState('')
+  const [tab, setTab] = useState('board')
   const waitingCount = players.filter((p) => p.status === 'waiting').length
+  const resting = players.filter((p) => p.status === 'resting')
+
+  const counts = {
+    present: players.filter((p) => p.status !== 'absent').length,
+    waiting: waitingCount,
+    // คอร์ตที่มีเกมอยู่ — บอกบนแท็บว่ายังมีเกมค้างต้องกลับไปจบ
+    playing: courts.filter((c) => c.match).length,
+    // ใช้ยอดจาก view ไม่ใช่ history.length เพราะ history ดึงมาแค่ 30 แถวล่าสุด
+    // ตัวเลขบนแท็บจะได้ไม่ค้างที่ 30 ทั้งที่เล่นไปมากกว่านั้น
+    games: summary?.finishedGames ?? 0,
+  }
 
   async function run(fn) {
     setHeadError('')
@@ -120,19 +156,41 @@ export default function PlayDayPage() {
     .filter(Boolean)
     .join('และ')
 
+  const timeRange = [clock(day.startTime), clock(day.endTime)].filter(Boolean).join('–')
+  const plannedHours = hoursBetween(clock(day.startTime), clock(day.endTime))
+
   return (
     <>
       <section className="panel">
+        <Link to={`/club/${clubId}`} className="back-link">
+          กลับไปหน้าก๊วน
+        </Link>
+
         <div className="page-head">
           <div>
-            <Link to={`/club/${clubId}`} className="back-link">
-              ← กลับไปหน้าก๊วน
-            </Link>
             <h2>{formatThaiDate(day.playDate)}</h2>
             <p className="panel-lead">
               {[day.venueName, day.shuttleBrandName].filter(Boolean).join(' · ') || 'ยังไม่ระบุสนาม'}
               {' · '}
               <span className={`badge badge-${day.status}`}>{STATUS_LABEL[day.status]}</span>
+            </p>
+
+            {/* เวลาที่นัด กับชั่วโมงที่จองรวมทุกคอร์ต เป็นคนละตัวเลข
+                (จอง 2 คอร์ตช่วง 19:00–22:00 = นัด 3 ชม. แต่จ่ายค่าสนาม 6 ชม.) */}
+            <p className="day-meta mono">
+              {timeRange ? (
+                <>
+                  {timeRange}
+                  {plannedHours != null && ` · ${formatHoursLabel(plannedHours)}`}
+                </>
+              ) : (
+                'ยังไม่ระบุเวลา'
+              )}
+              {summary?.bookedHours > 0 && (
+                <span className="day-meta-sub">
+                  จอง {summary.courtCount} คอร์ต รวม {formatHoursLabel(summary.bookedHours)}
+                </span>
+              )}
             </p>
           </div>
 
@@ -230,79 +288,127 @@ export default function PlayDayPage() {
 
       {(day.status === 'planned' || day.status === 'playing') && (
         <>
-          <div className="net-divider" />
+          {/* แท็บติดขอบบนตอนเลื่อน — หน้ายาว ถ้าต้องเลื่อนกลับขึ้นมาสลับจะน่ารำคาญ */}
+          <div className="tab-bar" role="tablist">
+            {DAY_TABS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={tab === t.id}
+                className={`tab-btn${tab === t.id ? ' is-active' : ''}`}
+                onClick={() => setTab(t.id)}
+              >
+                {t.label}
+                {t.count(counts) != null && (
+                  <span className="tab-count mono">{t.count(counts)}</span>
+                )}
+              </button>
+            ))}
+          </div>
 
-          <section className="panel">
-            <h2>ผู้เล่น ({players.filter((p) => p.status !== 'absent').length} คน)</h2>
-            {canEdit && <PlayerForm onAdd={addPlayer} />}
-            {boardLoading ? (
-              <SkeletonQueue />
-            ) : (
-              <PlayerQueue
+          {tab === 'board' && (
+            <section className="panel">
+              <h2>คอร์ต</h2>
+              {!isLive && (
+                <p className="panel-hint">
+                  กดปุ่ม &ldquo;เริ่มวันเล่น&rdquo; ด้านบนก่อน ถึงจะจัดคนลงคอร์ตได้
+                </p>
+              )}
+
+              {/* คนที่ติดพักอยู่ ต้องเห็นจากหน้าคอร์ตด้วย ไม่ใช่เฉพาะแท็บผู้เล่น
+                  เพราะการสลับตัวจะดันคนออกมาพักโดยอัตโนมัติ ถ้าไม่มีอะไรเตือน
+                  เขาจะค้างอยู่ตรงนั้นทั้งวันโดยไม่มีใครสังเกต */}
+              {resting.length > 0 && (
+                <div className="resting-strip">
+                  <span className="resting-strip-label">พักอยู่ {resting.length} คน</span>
+                  {resting.map((p) => (
+                    <AsyncButton
+                      key={p.id}
+                      className="resting-chip"
+                      disabled={!canEdit}
+                      title={canEdit ? `ให้ ${p.name} กลับเข้าคิว` : undefined}
+                      onClick={() => toggleRest(p.id)}
+                    >
+                      {p.name}
+                      {canEdit && <span aria-hidden="true">↩</span>}
+                    </AsyncButton>
+                  ))}
+                  {canEdit && <span className="resting-strip-hint">กดชื่อเพื่อให้กลับเข้าคิว</span>}
+                </div>
+              )}
+              {boardLoading ? (
+                <SkeletonCourts />
+              ) : (
+                <CourtBoard
+                  courts={courts}
+                  readOnly={!canEdit}
+                  waitingCount={waitingCount}
+                  queueMode={day.queueMode}
+                  onChangeQueueMode={updateQueueMode}
+                  onAddCourt={addCourt}
+                  onRemoveCourt={removeCourt}
+                  onAssign={assignCourt}
+                  onStart={startMatch}
+                  onSubstitute={substitutePlayer}
+                  onCancel={cancelMatch}
+                  onFinish={finishMatch}
+                />
+              )}
+            </section>
+          )}
+
+          {tab === 'players' && (
+            <section className="panel">
+              <h2>ผู้เล่น ({counts.present} คน)</h2>
+              {canEdit && (
+                <>
+                  <PlayerForm onAdd={addPlayer} />
+                  <AddPlayersPicker ownerId={ownerId} players={players} onAdd={addPlayer} />
+                </>
+              )}
+              {boardLoading ? (
+                <SkeletonQueue />
+              ) : (
+                <PlayerQueue
+                  players={players}
+                  readOnly={!canEdit}
+                  onToggleRest={toggleRest}
+                  onRemove={removePlayer}
+                  onSetAttendance={setAttendance}
+                />
+              )}
+            </section>
+          )}
+
+          {tab === 'billing' && (
+            <section className="panel">
+              <h2>หารค่าใช้จ่าย</h2>
+              <BillingPanel
                 players={players}
-                readOnly={!canEdit}
-                onToggleRest={toggleRest}
-                onRemove={removePlayer}
-                onSetAttendance={setAttendance}
-              />
-            )}
-          </section>
-
-          <div className="net-divider" />
-
-          <section className="panel">
-            <h2>คอร์ต</h2>
-            {!isLive && (
-              <p className="panel-hint">กดปุ่ม &ldquo;เริ่มวันเล่น&rdquo; ด้านบนก่อน ถึงจะจัดคนลงคอร์ตได้</p>
-            )}
-            {boardLoading ? (
-              <SkeletonCourts />
-            ) : (
-              <CourtBoard
                 courts={courts}
                 readOnly={!canEdit}
-                waitingCount={waitingCount}
-                queueMode={day.queueMode}
-                onChangeQueueMode={updateQueueMode}
-                onAddCourt={addCourt}
-                onRemoveCourt={removeCourt}
-                onAssign={assignCourt}
-                onStart={startMatch}
-                onSubstitute={substitutePlayer}
-                onCancel={cancelMatch}
-                onFinish={finishMatch}
+                billing={billing}
+                onChangeBilling={updateBilling}
+                onTogglePaying={togglePaying}
+                onChangeCourtHours={updateCourtHours}
               />
-            )}
-          </section>
+            </section>
+          )}
 
-          <div className="net-divider" />
+          {tab === 'stats' && (
+            <section className="panel">
+              <h2>สถิติวันนี้</h2>
+              <SessionStats players={players} summary={summary} />
+            </section>
+          )}
 
-          <section className="panel">
-            <h2>หารค่าใช้จ่าย</h2>
-            <BillingPanel
-              players={players}
-              courts={courts}
-              readOnly={!canEdit}
-              billing={billing}
-              onChangeBilling={updateBilling}
-              onTogglePaying={togglePaying}
-              onChangeCourtHours={updateCourtHours}
-            />
-          </section>
-
-          <div className="net-divider" />
-
-          <section className="panel">
-            <h2>สถิติวันนี้</h2>
-            <SessionStats players={players} summary={summary} />
-          </section>
-
-          <div className="net-divider" />
-
-          <section className="panel">
-            <h2>ประวัติการแข่งขัน</h2>
-            <MatchHistory history={history} />
-          </section>
+          {tab === 'history' && (
+            <section className="panel">
+              <h2>ประวัติการแข่งขัน</h2>
+              <MatchHistory history={history} />
+            </section>
+          )}
         </>
       )}
     </>

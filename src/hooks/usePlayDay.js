@@ -32,6 +32,7 @@ function mapDay(row) {
 export function usePlayDay(sessionId) {
   const [day, setDay] = useState(null)
   const [role, setRole] = useState(null)
+  const [ownerId, setOwnerId] = useState(null)
   const [billing, setBilling] = useState({ hourlyRate: '', shuttlePrice: '', shuttleCount: '' })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -73,12 +74,14 @@ export function usePlayDay(sessionId) {
         // viewer เห็นปุ่มแล้วกดไม่ได้ จะดูเหมือนแอปพัง ทั้งที่ RLS ทำงานถูก
         const { data: clubRow } = await supabase
           .from('v_my_clubs')
-          .select('role')
+          .select('role, owner_id')
           .eq('id', data.club_id)
           .maybeSingle()
 
         if (!alive) return
         setRole(clubRow?.role ?? null)
+        // ข้อมูลหลักผูกกับบัญชีเจ้าของก๊วน ไม่ใช่คนที่ล็อกอินอยู่
+        setOwnerId(clubRow?.owner_id ?? null)
       }
       setLoading(false)
     }
@@ -147,6 +150,7 @@ export function usePlayDay(sessionId) {
   return {
     day,
     role,
+    ownerId,
     // viewer ดูได้อย่างเดียว — ตรงกับ can_edit_session ฝั่ง DB
     canEdit: role === 'owner' || role === 'editor',
     billing,
