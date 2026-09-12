@@ -21,7 +21,9 @@ export default function MatchHistory({ history }) {
     <>
       {avgSeconds != null && (
         <p className="history-summary mono">
-          {history.length} เกม · เฉลี่ยเกมละ {formatDuration(avgSeconds)} นาที · รวม{' '}
+          {/* ไม่ต่อคำว่า "นาที" ท้าย mm:ss เพราะ "14:32 นาที" อ่านแล้วเข้าใจว่า
+              14 นาที 32 อะไรไม่รู้ — เวลารวมเป็นนาทีเต็มจึงต่อหน่วยได้ */}
+          {history.length} เกม · เฉลี่ยเกมละ {formatDuration(avgSeconds)} (นาที:วินาที) · รวม{' '}
           {Math.round(totalSeconds / 60)} นาที
         </p>
       )}

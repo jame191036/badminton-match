@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useClubDays } from '../hooks/useClubDays'
+import { usePastDays } from '../hooks/usePastDays'
 import ClubSharePanel from '../components/ClubSharePanel'
 import ClubSettingsPanel from '../components/ClubSettingsPanel'
 import { SkeletonHead, SkeletonList } from '../components/Skeleton'
@@ -66,10 +67,6 @@ export default function ClubPage() {
   const upcoming = days
     .filter((d) => d.status === 'playing' || (d.status === 'planned' && d.playDate >= today))
     .sort(byDateAsc)
-
-  const past = days
-    .filter((d) => d.status === 'done' || d.status === 'cancelled')
-    .sort(byDateDesc)
 
   async function run(fn) {
     setActionError('')
@@ -152,10 +149,8 @@ export default function ClubPage() {
         ) : tab === 'settings' ? (
           <ClubSettingsPanel
             club={club}
-            stats={{
-              dayCount: days.length,
-              gameCount: days.reduce((sum, d) => sum + d.gameCount, 0),
-            }}
+            // total_days นับทุกสถานะ รวม playing กับ cancelled ที่ cascade ก็ลบไปด้วย
+            stats={{ dayCount: club.totalDays }}
             onRename={renameClub}
             onDelete={async () => {
               await deleteClub()
@@ -169,7 +164,9 @@ export default function ClubPage() {
             <div className="subtab-bar" role="tablist">
               {[
                 { id: 'upcoming', label: 'ที่จะเล่น', count: overdue.length + upcoming.length },
-                { id: 'past', label: 'ที่เล่นไปแล้ว', count: past.length },
+                // นับจาก v_my_clubs เพราะประวัติโหลดทีละหน้า และต้องรวมวันที่ยกเลิก
+                // ให้ตรงกับแถวในตาราง ซึ่งแสดงทั้ง done และ cancelled
+                { id: 'past', label: 'ที่เล่นไปแล้ว', count: club.doneDays + club.cancelledDays },
               ].map((t) => (
                 <button
                   key={t.id}
@@ -186,15 +183,7 @@ export default function ClubPage() {
             </div>
 
             {dayTab === 'past' ? (
-              past.length === 0 ? (
-                <p className="empty-text">ยังไม่มีประวัติ — วันที่จบแล้วจะมาโผล่ที่นี่</p>
-              ) : (
-                <ul className="day-list">
-                  {past.map((day) => (
-                    <DayRow key={day.id} day={day} clubId={clubId} canEdit={false} />
-                  ))}
-                </ul>
-              )
+              <PastDaysTable clubId={clubId} />
             ) : (
               <>
                 {overdue.length > 0 && (
@@ -241,6 +230,86 @@ export default function ClubPage() {
           </>
         )}
       </section>
+    </>
+  )
+}
+
+/**
+ * ประวัติวันเล่น — เป็นตารางเพราะทุกแถวมีคอลัมน์เดียวกันและคนมาดูเพื่อ
+ * "เทียบ" (วันไหนจ่ายเยอะ วันไหนคนเยอะ) ซึ่งการ์ดเรียงกันเทียบยาก
+ */
+function PastDaysTable({ clubId }) {
+  const { days, loading, error, page, pageCount, total, goTo } = usePastDays(clubId)
+
+  if (loading && days.length === 0) return <SkeletonList count={5} lines={1} />
+  if (error) return <p className="auth-error">{error}</p>
+  if (total === 0) {
+    return <p className="empty-text">ยังไม่มีประวัติ — วันที่จบแล้วจะมาโผล่ที่นี่</p>
+  }
+
+  return (
+    <>
+      <div className="table-wrap">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>วันที่</th>
+              <th>สนาม</th>
+              <th>เวลา</th>
+              <th className="is-num">คน</th>
+              <th className="is-num">เกม</th>
+              <th className="is-num">ยอดรวม</th>
+              <th className="is-num">คนละ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {days.map((day) => (
+              <tr key={day.id} className={day.status === 'cancelled' ? 'is-cancelled' : ''}>
+                <td>
+                  <Link to={`/club/${clubId}/day/${day.id}`} className="table-link">
+                    {formatThaiDate(day.playDate)}
+                  </Link>
+                  {day.status === 'cancelled' && <span className="badge badge-cancelled">ยกเลิก</span>}
+                </td>
+                <td>{day.venueName ?? '—'}</td>
+                <td className="mono">{formatTimeRange(day.startTime, day.endTime) ?? '—'}</td>
+                <td className="is-num mono">{day.status === 'cancelled' ? '—' : day.playerCount}</td>
+                <td className="is-num mono">{day.status === 'cancelled' ? '—' : day.gameCount}</td>
+                <td className="is-num mono">
+                  {day.status === 'cancelled' ? '—' : day.totalFee.toLocaleString('th-TH')}
+                </td>
+                <td className="is-num mono">
+                  {day.status === 'cancelled' ? '—' : day.perPerson.toLocaleString('th-TH')}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {pageCount > 1 && (
+        <div className="pager">
+          <button
+            type="button"
+            className="btn-ghost"
+            disabled={page === 0 || loading}
+            onClick={() => goTo(page - 1)}
+          >
+            ← ก่อนหน้า
+          </button>
+          <span className="pager-info mono">
+            หน้า {page + 1} / {pageCount} · ทั้งหมด {total} วัน
+          </span>
+          <button
+            type="button"
+            className="btn-ghost"
+            disabled={page >= pageCount - 1 || loading}
+            onClick={() => goTo(page + 1)}
+          >
+            ถัดไป →
+          </button>
+        </div>
+      )}
     </>
   )
 }

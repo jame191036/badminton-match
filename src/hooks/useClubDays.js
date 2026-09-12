@@ -43,7 +43,13 @@ export function useClubDays(clubId) {
     async function load() {
       const [clubRes, daysRes] = await Promise.all([
         supabase.from('v_my_clubs').select('*').eq('id', clubId).maybeSingle(),
-        supabase.from('v_club_days').select('*').eq('club_id', clubId),
+        // เอาเฉพาะวันที่ยังต้องจัดการ — ประวัติที่จบแล้วโหลดแยกแบบแบ่งหน้า
+        // (usePastDays) เพราะมันสะสมไปเรื่อย ๆ ไม่มีวันหยุด
+        supabase
+          .from('v_club_days')
+          .select('*')
+          .eq('club_id', clubId)
+          .in('status', ['planned', 'playing']),
       ])
 
       if (!alive) return
@@ -62,6 +68,12 @@ export function useClubDays(clubId) {
                 role: clubRes.data.role,
                 isMine: clubRes.data.is_mine,
                 playingSessionId: clubRes.data.playing_session_id,
+                // นับจาก view ไม่ได้นับจากแถวที่โหลดมา เพราะประวัติไม่ได้โหลดครบ
+                doneDays: clubRes.data.done_days ?? 0,
+                plannedDays: clubRes.data.planned_days ?? 0,
+                cancelledDays: clubRes.data.cancelled_days ?? 0,
+                // รวมทุกสถานะ รวม playing กับ cancelled ที่สองตัวบนไม่ได้นับ
+                totalDays: clubRes.data.total_days ?? 0,
               }
             : null,
         )
