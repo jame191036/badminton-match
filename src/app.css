@@ -484,10 +484,32 @@
   font-size: 0.9rem;
   flex-wrap: wrap;
 }
-.history-time { color: var(--text-faintest); width: 52px; }
+/* ช่วงเวลากว้างขึ้นเพราะแสดงทั้งเวลาเริ่มและเวลาจบ */
+.history-time { color: var(--text-faintest); width: 96px; flex: none; }
 .history-court { color: var(--court-dark); font-weight: 600; min-width: 70px; }
 .history-teams { flex: 1; }
 .vs-inline { color: var(--coral); font-weight: 600; }
+
+.history-duration {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: var(--court);
+  background: var(--skill1-bg);
+}
+
+.history-summary {
+  margin: 0 0 12px;
+  font-size: 0.82rem;
+  color: var(--text-faint);
+}
+
+@media (max-width: 560px) {
+  /* จอแคบ: ให้ทีมขึ้นบรรทัดใหม่เต็มความกว้าง แทนที่จะบีบจนอ่านไม่ออก */
+  .history-item { flex-wrap: wrap; gap: 8px; }
+  .history-teams { flex: 1 1 100%; order: 3; }
+}
 
 /* Billing */
 .billing-inputs {

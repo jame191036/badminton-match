@@ -125,16 +125,27 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
 
     if (historyRes.data) {
       setHistory(
-        historyRes.data.map((h) => ({
-          id: h.id,
-          time: new Date(h.ended_at).toLocaleTimeString('th-TH', {
-            hour: '2-digit',
-            minute: '2-digit',
-          }),
-          courtName: h.court_name,
-          teamA: h.team_a_names ?? [],
-          teamB: h.team_b_names ?? [],
-        }))
+        historyRes.data.map((h) => {
+          const clock = (v) =>
+            v ? new Date(v).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : ''
+
+          // เวลาที่ใช้จริงของเกมนั้น คิดจากตอนกด "เริ่มเกม" ถึงตอนกด "จบเกม"
+          // (ไม่ใช่ตั้งแต่จับคู่ลงคอร์ต — ช่วง pending ยังไม่ได้ตีกัน)
+          const seconds =
+            h.started_at && h.ended_at
+              ? Math.max(0, (new Date(h.ended_at) - new Date(h.started_at)) / 1000)
+              : null
+
+          return {
+            id: h.id,
+            time: clock(h.ended_at),
+            startTime: clock(h.started_at),
+            durationSeconds: seconds,
+            courtName: h.court_name,
+            teamA: h.team_a_names ?? [],
+            teamB: h.team_b_names ?? [],
+          }
+        })
       )
     }
 
