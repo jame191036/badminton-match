@@ -9,6 +9,7 @@ import ClubListPage from './pages/ClubListPage'
 import MasterDataPage from './pages/MasterDataPage'
 import ClubPage from './pages/ClubPage'
 import NewPlayDayPage from './pages/NewPlayDayPage'
+import EditPlayDayPage from './pages/EditPlayDayPage'
 import PlayDayPage from './pages/PlayDayPage'
 import './app.css'
 
@@ -70,6 +71,7 @@ export default function App() {
           <Route path="club/:clubId" element={<ClubPage />} />
           <Route path="club/:clubId/new" element={<NewPlayDayPage />} />
           <Route path="club/:clubId/day/:sessionId" element={<PlayDayPage />} />
+          <Route path="club/:clubId/day/:sessionId/edit" element={<EditPlayDayPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

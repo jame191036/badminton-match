@@ -197,6 +197,11 @@ export default function PlayDayPage() {
           <div className="page-head-actions">
             {!canEdit && <span className="badge badge-shared">ดูได้อย่างเดียว</span>}
             {canEdit && day.status === 'planned' && (
+              <Link to={`/club/${clubId}/day/${sessionId}/edit`} className="btn-ghost btn-link">
+                แก้ไข
+              </Link>
+            )}
+            {canEdit && day.status === 'planned' && (
               <AsyncButton
                 className="btn-primary"
                 busyLabel="กำลังเริ่ม..."
