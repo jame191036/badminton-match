@@ -823,6 +823,13 @@
 
 .page-head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
+.btn-refresh { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ใช้ไอคอนลูกศรวนเป็นสปินเนอร์เอง แทนที่จะโชว์วงกลมหมุนของ AsyncButton
+   คู่กับไอคอนรีเฟรช ซึ่งจะกลายเป็นของหมุนสองอันซ้อนกันในปุ่มเดียว */
+.btn-refresh .btn-spinner { display: none; }
+.btn-refresh.is-busy svg { animation: auth-spin 0.7s linear infinite; }
+
 /* ปุ่มย้อนกลับ — ทำให้เป็นปุ่มจริง ๆ ไม่ใช่ข้อความเล็ก ๆ
    เพราะเป็นทางออกหลักของทุกหน้า และต้องกดด้วยนิ้วโป้งได้ */
 .back-link {
@@ -2414,6 +2421,8 @@
   :root { --shell-pad: 14px; }
   /* จอเล็กเหลือแค่ลูกขนไก่ ให้ที่ว่างไปกับเมนูซึ่งจำเป็นกว่าชื่อแอป */
   .brand-name { display: none; }
+  /* ปุ่มรีเฟรชเหลือแต่ไอคอน ที่ว่างในแถวหัวเรื่องยกให้ปุ่มเริ่ม/จบวันเล่น */
+  .btn-refresh-label { display: none; }
   .app-nav { flex-wrap: wrap; gap: 6px; }
   .panel { padding: 16px; }
 
