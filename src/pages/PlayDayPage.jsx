@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { RefreshCw } from 'lucide-react'
 import { usePlayDay } from '../hooks/usePlayDay'
 import { useBadmintonData } from '../hooks/useBadmintonData'
 import PlayerForm from '../components/PlayerForm'
@@ -68,6 +69,7 @@ export default function PlayDayPage() {
     updateQueueMode,
     startDay,
     closeDay,
+    refetch: refetchDay,
   } = usePlayDay(sessionId)
 
   const isLive = day?.status === 'playing'
@@ -79,6 +81,7 @@ export default function PlayDayPage() {
     loading: boardLoading,
     actionError,
     clearActionError,
+    refresh: refreshBoard,
     addPlayer,
     removePlayer,
     togglePaying,
@@ -100,11 +103,30 @@ export default function PlayDayPage() {
   const waitingCount = players.filter((p) => p.status === 'waiting').length
   const resting = players.filter((p) => p.status === 'resting')
 
+  const isClosed = day?.status === 'done'
+  // แก้อะไรไม่ได้แล้วถ้าวันจบไปแล้ว ต่อให้เป็นเจ้าของก็ตาม
+  const viewOnly = !canEdit || isClosed
+
+  /**
+   * วันที่จบแล้วเปิดดูย้อนหลังได้ แต่ตัดสองแท็บออก:
+   *   คอร์ต   — เกมจบหมดแล้ว เหลือแต่คอร์ตว่างกับปุ่มที่กดไม่ได้
+   *   หารเงิน — BillingPanel คำนวณสดจากราคาปัจจุบัน ซึ่งอาจไม่ตรงกับยอดที่
+   *             freeze ไว้ ยอดจริงแสดงอยู่ในกล่อง "ยอดที่ล็อกไว้" ด้านบนแล้ว
+   */
+  const tabs = isClosed
+    ? DAY_TABS.filter((t) => t.id !== 'board' && t.id !== 'billing')
+    : DAY_TABS
+
+  // เลือกแท็บที่ยังมีอยู่จริง — ค่าตั้งต้น 'board' ใช้กับวันที่จบแล้วไม่ได้
+  const activeTab = tabs.some((t) => t.id === tab) ? tab : tabs[0].id
+
   const counts = {
     present: players.filter((p) => p.status !== 'absent').length,
-    waiting: waitingCount,
+    // วันที่จบแล้วไม่มีใคร "รอคิว" หรือ "กำลังเล่น" อีก สถานะที่ค้างอยู่บนแถว
+    // ผู้เล่นเป็นแค่ภาพตอนกดจบวัน เอามาขึ้นบนแท็บจะอ่านเหมือนยังเล่นค้างอยู่
+    waiting: isClosed ? 0 : waitingCount,
     // คอร์ตที่มีเกมอยู่ — บอกบนแท็บว่ายังมีเกมค้างต้องกลับไปจบ
-    playing: courts.filter((c) => c.match).length,
+    playing: isClosed ? 0 : courts.filter((c) => c.match).length,
     // ใช้ยอดจาก view ไม่ใช่ history.length เพราะ history ดึงมาแค่ 30 แถวล่าสุด
     // ตัวเลขบนแท็บจะได้ไม่ค้างที่ 30 ทั้งที่เล่นไปมากกว่านั้น
     games: summary?.finishedGames ?? 0,
@@ -197,6 +219,22 @@ export default function PlayDayPage() {
 
           <div className="page-head-actions">
             {!canEdit && <span className="badge badge-shared">ดูได้อย่างเดียว</span>}
+
+            {/* realtime ทำงานอยู่แล้ว แต่เน็ตสนามแบดหลุดบ่อย พอ subscription
+                ตาย เครื่องจะค้างอยู่ที่ข้อมูลเก่าเงียบ ๆ ปุ่มนี้คือทางออกที่
+                ไม่ต้องรีโหลดทั้งหน้า (ซึ่งจะเสียตำแหน่งแท็บที่เปิดอยู่ด้วย) */}
+            <AsyncButton
+              className="btn-ghost btn-refresh"
+              title="โหลดข้อมูลใหม่"
+              onClick={async () => {
+                refetchDay()
+                await refreshBoard()
+              }}
+            >
+              <RefreshCw size={16} aria-hidden="true" />
+              <span className="btn-refresh-label">รีเฟรช</span>
+            </AsyncButton>
+
             {canEdit && day.status === 'planned' && (
               <Link to={`/club/${clubId}/day/${sessionId}/edit`} className="btn-ghost btn-link">
                 แก้ไข
@@ -292,17 +330,17 @@ export default function PlayDayPage() {
         </section>
       )}
 
-      {(day.status === 'planned' || day.status === 'playing') && (
+      {day.status !== 'cancelled' && (
         <>
           {/* แท็บติดขอบบนตอนเลื่อน — หน้ายาว ถ้าต้องเลื่อนกลับขึ้นมาสลับจะน่ารำคาญ */}
           <div className="tab-bar" role="tablist">
-            {DAY_TABS.map((t) => (
+            {tabs.map((t) => (
               <button
                 key={t.id}
                 type="button"
                 role="tab"
-                aria-selected={tab === t.id}
-                className={`tab-btn${tab === t.id ? ' is-active' : ''}`}
+                aria-selected={activeTab === t.id}
+                className={`tab-btn${activeTab === t.id ? ' is-active' : ''}`}
                 onClick={() => setTab(t.id)}
               >
                 {t.label}
@@ -313,7 +351,7 @@ export default function PlayDayPage() {
             ))}
           </div>
 
-          {tab === 'board' && (
+          {activeTab === 'board' && (
             <section className="panel">
               <h2>คอร์ต</h2>
               {!isLive && (
@@ -365,10 +403,10 @@ export default function PlayDayPage() {
             </section>
           )}
 
-          {tab === 'players' && (
+          {activeTab === 'players' && (
             <section className="panel">
               <h2>ผู้เล่น ({counts.present} คน)</h2>
-              {canEdit && (
+              {!viewOnly && (
                 <>
                   <PlayerForm onAdd={addPlayer} />
                   <AddPlayersPicker ownerId={ownerId} players={players} onAdd={addPlayer} />
@@ -379,7 +417,8 @@ export default function PlayDayPage() {
               ) : (
                 <PlayerQueue
                   players={players}
-                  readOnly={!canEdit}
+                  readOnly={viewOnly}
+                  closed={isClosed}
                   onToggleRest={toggleRest}
                   onRemove={removePlayer}
                   onSetAttendance={setAttendance}
@@ -388,7 +427,7 @@ export default function PlayDayPage() {
             </section>
           )}
 
-          {tab === 'billing' && (
+          {activeTab === 'billing' && (
             <section className="panel">
               <h2>หารค่าใช้จ่าย</h2>
               <BillingPanel
@@ -403,14 +442,15 @@ export default function PlayDayPage() {
             </section>
           )}
 
-          {tab === 'stats' && (
+          {activeTab === 'stats' && (
             <section className="panel">
-              <h2>สถิติวันนี้</h2>
+              {/* "วันนี้" ใช้ไม่ได้กับวันที่จบไปแล้ว มันเป็นวันอื่นในอดีต */}
+              <h2>{isClosed ? 'สถิติของวันเล่นนี้' : 'สถิติวันนี้'}</h2>
               <SessionStats players={players} summary={summary} />
             </section>
           )}
 
-          {tab === 'history' && (
+          {activeTab === 'history' && (
             <section className="panel">
               <h2>ประวัติการแข่งขัน</h2>
               <MatchHistory history={history} />

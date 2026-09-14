@@ -395,6 +395,8 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
     loading,
     actionError,
     clearActionError,
+    // ดึงข้อมูลกระดานใหม่ทั้งชุด — ปุ่มรีเฟรชบนหน้าวันเล่นเรียกตัวนี้
+    refresh: refetchAll,
     addPlayer,
     removePlayer,
     togglePaying,
