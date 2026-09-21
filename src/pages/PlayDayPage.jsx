@@ -85,6 +85,7 @@ export default function PlayDayPage() {
     assignCourt,
     startMatch,
     substitutePlayer,
+    fillMatch,
     cancelMatch,
     finishMatch,
   } = useBadmintonData(sessionId, day?.queueMode ?? 'sequential')
@@ -297,6 +298,12 @@ export default function PlayDayPage() {
                 <span>คนละ</span>
                 <strong>{day.finals.perPerson.toLocaleString('th-TH')} บาท</strong>
               </li>
+              {/* ตัวหารไม่เท่ากับจำนวนผู้เล่นเสมอไป (มีคนไม่ร่วมจ่ายได้)
+                  ถ้าไม่บอก 9 คน × 130 จะไม่เท่ายอดรวมแล้วดูเหมือนคิดผิด */}
+              <li>
+                <span>หารกัน</span>
+                <strong>{day.finals.payerCount} คน</strong>
+              </li>
               <li>
                 <span>ผู้เล่น</span>
                 <strong>{day.finals.playerCount} คน</strong>
@@ -376,6 +383,7 @@ export default function PlayDayPage() {
                 <CourtBoard
                   courts={courts}
                   readOnly={!canEdit}
+                  live={isLive}
                   waitingCount={waitingCount}
                   queueMode={day.queueMode}
                   onChangeQueueMode={updateQueueMode}
@@ -385,6 +393,7 @@ export default function PlayDayPage() {
                   onAssign={assignCourt}
                   onStart={startMatch}
                   onSubstitute={substitutePlayer}
+                  onFill={fillMatch}
                   onCancel={cancelMatch}
                   onFinish={finishMatch}
                 />
@@ -442,7 +451,7 @@ export default function PlayDayPage() {
           {activeTab === 'history' && (
             <section className="panel">
               <h2>ประวัติการแข่งขัน</h2>
-              <MatchHistory history={history} />
+              <MatchHistory history={history} summary={summary} />
             </section>
           )}
         </>

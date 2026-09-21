@@ -8,14 +8,18 @@ function formatDuration(seconds) {
   return `${mm}:${ss}`
 }
 
-export default function MatchHistory({ history }) {
+/**
+ * history คือ 30 เกมล่าสุดเท่านั้น (ดู useBadmintonData) ยอดรวมจึงเอามาจาก
+ * summary ของทั้งวัน ไม่ใช่นับจากลิสต์ ไม่งั้นเล่นเกิน 30 เกมแล้วตัวเลขค้างที่ 30
+ */
+export default function MatchHistory({ history, summary }) {
   if (history.length === 0) {
     return <p className="empty-state small">ยังไม่มีประวัติการแข่งขัน</p>
   }
 
-  const withDuration = history.filter((h) => h.durationSeconds != null)
-  const totalSeconds = withDuration.reduce((sum, h) => sum + h.durationSeconds, 0)
-  const avgSeconds = withDuration.length > 0 ? totalSeconds / withDuration.length : null
+  const games = summary?.finishedGames ?? history.length
+  const totalMinutes = summary?.totalPlayMinutes ?? 0
+  const avgSeconds = games > 0 && totalMinutes > 0 ? (totalMinutes * 60) / games : null
 
   return (
     <>
@@ -23,9 +27,12 @@ export default function MatchHistory({ history }) {
         <p className="history-summary mono">
           {/* ไม่ต่อคำว่า "นาที" ท้าย mm:ss เพราะ "14:32 นาที" อ่านแล้วเข้าใจว่า
               14 นาที 32 อะไรไม่รู้ — เวลารวมเป็นนาทีเต็มจึงต่อหน่วยได้ */}
-          {history.length} เกม · เฉลี่ยเกมละ {formatDuration(avgSeconds)} (นาที:วินาที) · รวม{' '}
-          {Math.round(totalSeconds / 60)} นาที
+          {games} เกม · เฉลี่ยเกมละ {formatDuration(avgSeconds)} (นาที:วินาที) · รวม{' '}
+          {totalMinutes} นาที
         </p>
+      )}
+      {games > history.length && (
+        <p className="panel-hint">แสดง {history.length} เกมล่าสุด</p>
       )}
 
       <div className="history-item history-head" aria-hidden="true">

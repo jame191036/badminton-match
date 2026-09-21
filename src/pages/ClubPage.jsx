@@ -191,6 +191,7 @@ export default function ClubPage() {
                           day={day}
                           clubId={clubId}
                           canEdit={canEdit}
+                          canStart
                           overdue
                           onStart={() => run(() => startDay(day.id))}
                           onCancel={() => run(() => cancelDay(day.id))}
@@ -211,6 +212,7 @@ export default function ClubPage() {
                         day={day}
                         clubId={clubId}
                         canEdit={canEdit}
+                        canStart={day.playDate <= today}
                         onStart={() => run(() => startDay(day.id))}
                         onCancel={() => run(() => cancelDay(day.id))}
                       />
@@ -306,7 +308,8 @@ function PastDaysTable({ clubId }) {
   )
 }
 
-function DayRow({ day, clubId, canEdit, overdue = false, onStart, onCancel }) {
+// canStart = ถึงวันแล้ว — วันในอนาคตไม่มีปุ่ม "เริ่มวันนี้" (ยังเข้าไปเริ่มจากหน้าวันเล่นได้)
+function DayRow({ day, clubId, canEdit, canStart = false, overdue = false, onStart, onCancel }) {
   const confirm = useConfirm()
   const time = formatTimeRange(day.startTime, day.endTime)
 
@@ -333,9 +336,11 @@ function DayRow({ day, clubId, canEdit, overdue = false, onStart, onCancel }) {
 
       {canEdit && day.status === 'planned' && (
         <div className="day-row-actions">
-          <AsyncButton className="btn-primary" busyLabel="กำลังเริ่ม..." onClick={onStart}>
-            เริ่มวันนี้
-          </AsyncButton>
+          {canStart && (
+            <AsyncButton className="btn-primary" busyLabel="กำลังเริ่ม..." onClick={onStart}>
+              เริ่มวันนี้
+            </AsyncButton>
+          )}
           <AsyncButton
             className="btn-ghost btn-danger"
             onClick={async () => {

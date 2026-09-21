@@ -566,6 +566,7 @@ declare
   v_member_id uuid;
   v_player_id uuid;
   v_name text := trim(coalesce(p_name, ''));
+  v_skill smallint := p_skill;
 begin
   if not can_edit_session(p_session_id) then
     raise exception 'ไม่พบวันเล่นนี้ หรือไม่มีสิทธิ์แก้ไข';
@@ -586,23 +587,31 @@ begin
   where s.id = p_session_id;
 
   -- แขกขาจร (p_save_to_master = false) ไม่ถูกบันทึกเข้ารายชื่อ master
+  --
+  -- ชื่อที่มีอยู่แล้ว: ใช้ชื่อและระดับมือของสมาชิกคนนั้น ไม่เขียนทับ master
+  -- (ช่องระดับมือหน้างานตั้งค่าเริ่มไว้ที่ "มือกลาง" ถ้าเขียนทับ พิมพ์ชื่อคน
+  --  มือเก่งเข้าวันเล่นทีเดียว ข้อมูลหลักของเขาก็กลายเป็นมือกลางเงียบ ๆ)
   if p_save_to_master then
     insert into members (owner_id, name, default_skill)
     values (v_owner_id, v_name, p_skill)
-    on conflict (owner_id, lower(trim(name)))
-      do update set default_skill = excluded.default_skill
-    returning id into v_member_id;
+    on conflict (owner_id, lower(trim(name))) do nothing;
 
-    if exists (
-      select 1 from players
-      where session_id = p_session_id and member_id = v_member_id
-    ) then
-      raise exception '% อยู่ในวันเล่นนี้แล้ว', v_name;
-    end if;
+    select id, name, default_skill into v_member_id, v_name, v_skill
+    from members
+    where owner_id = v_owner_id and lower(trim(name)) = lower(v_name);
+  end if;
+
+  -- ชื่อซ้ำในวันเดียวกันแยกคนไม่ออกบนกระดาน — กันทั้งสมาชิกและแขก
+  if exists (
+    select 1 from players
+    where session_id = p_session_id
+      and (member_id = v_member_id or lower(trim(name)) = lower(v_name))
+  ) then
+    raise exception '% อยู่ในวันเล่นนี้แล้ว', v_name;
   end if;
 
   insert into players (session_id, member_id, name, skill)
-  values (p_session_id, v_member_id, v_name, p_skill)
+  values (p_session_id, v_member_id, v_name, v_skill)
   returning id into v_player_id;
 
   return v_player_id;
@@ -707,12 +716,23 @@ begin
     raise exception 'ต้องกดเริ่มวันเล่นก่อนถึงจะจัดคนลงคอร์ตได้';
   end if;
 
-  if exists (
-    select 1 from players
+  if coalesce(array_length(p_team_a, 1), 0) <> 2
+     or coalesce(array_length(p_team_b, 1), 0) <> 2
+     or (select count(distinct x) from unnest(p_team_a || p_team_b) x) <> 4 then
+    raise exception 'ต้องจับคู่ 2 ต่อ 2 และเป็นคนละคนกันทั้ง 4 คน';
+  end if;
+
+  -- ล็อกแถวก่อนเช็ค: สองเครื่อง (หรือกดสองคอร์ตติดกัน) จับคนชุดเดียวกัน
+  -- คำสั่งหลังจะรอจนคำสั่งแรกจบ แล้วเห็นว่าคนเหล่านี้ไม่ได้ 'waiting' แล้ว
+  perform 1 from players where id = any(p_team_a || p_team_b) for update;
+
+  if (
+    select count(*) from players
     where id = any(p_team_a || p_team_b)
-      and (session_id <> v_session_id or status = 'absent')
-  ) then
-    raise exception 'มีผู้เล่นที่ไม่ได้อยู่ในวันเล่นนี้ หรือถูกทำเครื่องหมายว่าไม่มา';
+      and session_id = v_session_id
+      and status = 'waiting'
+  ) <> 4 then
+    raise exception 'มีผู้เล่นที่ไม่ได้รอคิวอยู่แล้ว (อาจถูกจัดลงคอร์ตอื่นไปก่อน) — ลองจับคู่ใหม่อีกครั้ง';
   end if;
 
   insert into matches (session_id, court_id, court_name, status, started_at)
@@ -753,7 +773,8 @@ begin
     raise exception 'ไม่พบเกมนี้ หรือไม่มีสิทธิ์แก้ไข';
   end if;
 
-  select count(*) into v_player_count from match_players where match_id = p_match_id;
+  -- player_id เป็น null ได้ถ้าผู้เล่นถูกลบทิ้ง แถวนั้นไม่ใช่คนจริงในคอร์ต
+  select count(player_id) into v_player_count from match_players where match_id = p_match_id;
   if v_player_count <> 4 then
     raise exception 'ต้องมีผู้เล่นครบ 4 คนถึงจะเริ่มเกมได้ (ตอนนี้ % คน)', v_player_count;
   end if;
@@ -851,6 +872,58 @@ begin
   );
 
   delete from matches where id = p_match_id; -- cascade ลบ match_players ด้วย
+end;
+$$;
+
+-- ------------------------------------------------------------
+-- เติมที่ว่างในเกมที่ยังไม่เริ่ม ด้วยคนแรกในคิว (เกณฑ์เดียวกับ substitute_player)
+-- ที่ว่างเกิดจากสลับตัวตอนไม่มีใครรอคิว — พอมีคนกลับเข้าคิวแล้ว
+-- ต้องมีทางเติมให้ครบ ไม่งั้นทางเดียวคือยกเลิกทั้งเกม
+-- คืนจำนวนคนที่เติมเข้าไป (0 = คิวว่าง)
+-- ------------------------------------------------------------
+create or replace function fill_match(p_match_id uuid)
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_session_id uuid;
+  v_team text;
+  v_next uuid;
+  v_added int := 0;
+begin
+  select session_id into v_session_id
+  from matches where id = p_match_id and status = 'pending'
+  for update;
+
+  if v_session_id is null or not can_edit_session(v_session_id) then
+    raise exception 'ไม่พบเกมนี้ ไม่มีสิทธิ์แก้ไข หรือเกมเริ่มไปแล้ว';
+  end if;
+
+  foreach v_team in array array['A', 'B'] loop
+    while (
+      select count(player_id) from match_players
+      where match_id = p_match_id and team = v_team
+    ) < 2 loop
+      select p.id into v_next
+      from players p
+      where p.session_id = v_session_id and p.status = 'waiting'
+      order by p.games_played, p.queue_seq
+      limit 1
+      for update skip locked;
+
+      exit when v_next is null;
+
+      insert into match_players (match_id, player_id, player_name, skill, team)
+      select p_match_id, id, name, skill, v_team from players where id = v_next;
+
+      update players set status = 'playing' where id = v_next;
+      v_added := v_added + 1;
+    end loop;
+  end loop;
+
+  return v_added;
 end;
 $$;
 
@@ -998,6 +1071,7 @@ grant execute on function assign_court(uuid, uuid[], uuid[]) to authenticated;
 grant execute on function start_match(uuid) to authenticated;
 grant execute on function substitute_player(uuid, uuid) to authenticated;
 grant execute on function cancel_match(uuid) to authenticated;
+grant execute on function fill_match(uuid) to authenticated;
 grant execute on function finish_match(uuid) to authenticated;
 grant execute on function remove_court(uuid) to authenticated;
 grant execute on function rename_court(uuid, text) to authenticated;

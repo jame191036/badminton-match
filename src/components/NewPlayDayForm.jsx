@@ -13,8 +13,6 @@ import { addDays, addHours, clock, hoursBetween, thaiDate, todayISO } from '../u
 const START_PRESETS = ['17:00', '18:00', '19:00', '20:00']
 const DURATION_PRESETS = [1, 2, 3]
 
-const BLANK_COURT = { name: '', hours: '' }
-
 // ขนาด/ความหนาเส้นของไอคอนหัวข้อ ให้ตรงกับไอคอนอื่นในแอป
 const ICON = { size: 19, strokeWidth: 1.8, className: 'form-section-icon', 'aria-hidden': true }
 
@@ -128,7 +126,6 @@ export default function NewPlayDayForm({
         name: c.name.trim() || `คอร์ต ${i + 1}`,
         hours: Number(c.hours) || 0,
       }))
-      .filter((c) => c.name)
 
     // required บน input ใช้ไม่ได้ถ้าส่วนนั้นถูกพับอยู่ เพราะ FormSection
     // ถอด children ออกจาก DOM ไปเลย เบราว์เซอร์จึงไม่เห็นช่องที่ต้องตรวจ
@@ -185,21 +182,39 @@ export default function NewPlayDayForm({
 
   const duration = hoursBetween(startTime, endTime)
 
+  /**
+   * ตั้งเวลาเริ่ม/จบ แล้วให้ชั่วโมงของคอร์ตตามความยาวที่นัดไว้
+   *
+   * ส่วนใหญ่จองทุกคอร์ตเท่ากับเวลาที่นัด ถ้าไม่ตามให้ ช่องชั่วโมงจะว่าง (ค่าสนาม = 0)
+   * หรือค้างค่าเก่าตอนแก้เวลา แตะเฉพาะคอร์ตที่ยังว่างหรือเท่ากับความยาวเดิม
+   * คอร์ตที่กรอกต่างออกไปเอง (เช่นจองคอร์ตสองแค่ชั่วโมงเดียว) ไม่ถูกเขียนทับ
+   */
+  function setTimes(start, end) {
+    const prev = hoursBetween(startTime, endTime)
+    const next = hoursBetween(start, end)
+    setStartTime(start)
+    setEndTime(end)
+    if (!(next > 0 && next <= 12)) return
+    setCourts((cs) =>
+      cs.map((c) =>
+        c.hours === '' || Number(c.hours) === prev ? { ...c, hours: String(next) } : c,
+      ),
+    )
+  }
+
   function pickStart(time) {
-    setStartTime(time)
     // รักษาความยาวเดิมไว้ ถ้ายังไม่เคยใส่เวลาจบก็ให้ 3 ชม. เป็นค่าเริ่ม
     //
     // ต้องเช็คช่วง ไม่ใช่แค่ว่ามีค่าไหม เพราะ hoursBetween วนรอบ 24 ชม.
     // เวลาจบก่อนเวลาเริ่ม (พิมพ์ผิด) จะออกมาเป็น ~22 ชม. ส่วนเวลาเท่ากันได้ 0
     // ทั้งสองแบบเอามาคูณต่อไม่ได้ ให้ตกกลับไปใช้ 3 ชม. แทน
     const keep = duration && duration > 0 && duration <= 8 ? duration : 3
-    setEndTime(addHours(time, keep))
+    setTimes(time, addHours(time, keep))
   }
 
   function pickDuration(hours) {
     const start = startTime || '19:00'
-    setStartTime(start)
-    setEndTime(addHours(start, hours))
+    setTimes(start, addHours(start, hours))
   }
 
   const totalHours = courts.reduce((s, c) => s + (Number(c.hours) || 0), 0)
@@ -280,11 +295,11 @@ export default function NewPlayDayForm({
           </div>
           <label className="field">
             <span className="field-label">เริ่ม</span>
-            <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+            <input type="time" value={startTime} onChange={(e) => setTimes(e.target.value, endTime)} />
           </label>
           <label className="field">
             <span className="field-label">ถึง</span>
-            <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+            <input type="time" value={endTime} onChange={(e) => setTimes(startTime, e.target.value)} />
           </label>
         </div>
       </FormSection>
@@ -339,7 +354,13 @@ export default function NewPlayDayForm({
           <button
             type="button"
             className="btn-ghost"
-            onClick={() => setCourts((prev) => [...prev, { ...BLANK_COURT }])}
+            // คอร์ตใหม่ได้ชั่วโมงเท่าเวลาที่นัดไว้เลย แก้ทีหลังได้
+            onClick={() =>
+              setCourts((prev) => [
+                ...prev,
+                { name: '', hours: duration > 0 && duration <= 12 ? String(duration) : '' },
+              ])
+            }
           >
             + เพิ่มคอร์ต
           </button>

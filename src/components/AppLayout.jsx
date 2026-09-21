@@ -1,4 +1,5 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { useEffect } from 'react'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import ThemeToggle from './ThemeToggle'
 import UserMenu from './UserMenu'
 
@@ -12,6 +13,14 @@ const NAV = [
  * ที่กดบ่อยทั้งคู่ ซ่อนไว้ในลิ้นชักจะกลายเป็นเพิ่มคลิกทุกครั้งที่สลับหน้า
  */
 export default function AppLayout({ user, theme, onToggleTheme, onSignOut }) {
+  const { pathname } = useLocation()
+
+  // เปลี่ยนหน้าแล้วเริ่มที่บนสุด — ไม่งั้นค้างตำแหน่งเลื่อนของหน้าก่อน
+  // (กดสร้างวันเล่นจากท้ายฟอร์ม แล้วหน้าวันเล่นเปิดมากลางจอ ไม่เห็นหัวเรื่อง)
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [pathname])
+
   return (
     <>
       <header className="app-bar">

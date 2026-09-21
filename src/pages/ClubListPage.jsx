@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useOutletContext } from 'react-router-dom'
+import { Link, useNavigate, useOutletContext } from 'react-router-dom'
 import { useClubs } from '../hooks/useClubs'
 import { SkeletonList } from '../components/Skeleton'
 import { thaiDate } from '../utils/date'
@@ -14,6 +14,7 @@ const formatThaiDate = (v) => thaiDate(v, { day: 'numeric', month: 'short', year
 
 export default function ClubListPage() {
   const { user } = useOutletContext()
+  const navigate = useNavigate()
   const { clubs, loading, error, createClub } = useClubs(user?.id)
   const [name, setName] = useState('')
   const [adding, setAdding] = useState(false)
@@ -25,12 +26,10 @@ export default function ClubListPage() {
     setFormError('')
     setAdding(true)
     try {
-      await createClub(name)
-      setName('')
-      setShowForm(false)
+      // เข้าก๊วนที่เพิ่งสร้างเลย สิ่งถัดไปที่ต้องทำคือสร้างวันเล่นในนั้น
+      navigate(`/club/${await createClub(name)}`)
     } catch (err) {
       setFormError(err.message)
-    } finally {
       setAdding(false)
     }
   }

@@ -217,10 +217,11 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
   // (รายชื่อสมาชิกจึงสะสมขึ้นมาเองโดยไม่ต้องมีหน้าจัดการแยก)
   // saveToMaster = false คือแขกขาจร: เล่นวันนี้วันเดียว ไม่ต้องไปโผล่ในรายชื่อ
   // (member_id เป็น null ได้ ประวัติเลยยังอยู่ครบแม้ไม่มีสมาชิกผูกไว้)
+  // คืน true เมื่อเพิ่มสำเร็จ — ฟอร์มจะได้ล้างช่องชื่อเฉพาะตอนเพิ่มได้จริง
   const addPlayer = useCallback(
     async (name, skill, saveToMaster = true) => {
-      if (!sessionId) return
-      await run(
+      if (!sessionId) return false
+      return run(
         supabase.rpc('add_player', {
           p_session_id: sessionId,
           p_name: name,
@@ -345,6 +346,12 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
     [run],
   )
 
+  // เติมที่ว่าง (จากการสลับตัวตอนคิวว่าง) ด้วยคนแรกในคิว
+  const fillMatch = useCallback(
+    (matchId) => run(supabase.rpc('fill_match', { p_match_id: matchId })),
+    [run],
+  )
+
   const cancelMatch = useCallback(
     (matchId) => run(supabase.rpc('cancel_match', { p_match_id: matchId })),
     [run],
@@ -377,6 +384,7 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
     assignCourt,
     startMatch,
     substitutePlayer,
+    fillMatch,
     cancelMatch,
     finishMatch,
   }

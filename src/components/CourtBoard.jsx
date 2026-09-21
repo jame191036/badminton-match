@@ -55,10 +55,13 @@ function TeamSide({ team, label, onSubstitute }) {
 export default function CourtBoard({
   courts,
   readOnly = false,
+  // วันเล่นเริ่มแล้วหรือยัง — ก่อนเริ่ม DB ไม่ยอมให้จับคู่ ปุ่มจึงต้องกดไม่ได้ตั้งแต่แรก
+  live = true,
   waitingCount,
   onAssign,
   onStart,
   onSubstitute,
+  onFill,
   onCancel,
   onFinish,
   onAddCourt,
@@ -162,14 +165,25 @@ export default function CourtBoard({
                     <>
                       {playerCount < 4 && (
                         <p className="court-warn">
-                          ขาดอีก {4 - playerCount} คน — ไม่มีใครรอคิวอยู่ ให้คนที่พักกลับเข้าคิว
-                          เพิ่มผู้เล่นใหม่ หรือยกเลิกไปก่อน
+                          ขาดอีก {4 - playerCount} คน —{' '}
+                          {waitingCount > 0
+                            ? 'มีคนรอคิวอยู่แล้ว กด “เติมจากคิว” ได้เลย'
+                            : 'ไม่มีใครรอคิวอยู่ ให้คนที่พักกลับเข้าคิว เพิ่มผู้เล่นใหม่ หรือยกเลิกไปก่อน'}
                         </p>
                       )}
                       {!readOnly && (
                         <div className="court-actions">
+                          {playerCount < 4 && waitingCount > 0 && (
+                            <AsyncButton
+                              className="btn-primary"
+                              busyLabel="กำลังเติม..."
+                              onClick={() => onFill(match.id)}
+                            >
+                              เติมจากคิว
+                            </AsyncButton>
+                          )}
                           <AsyncButton
-                            className="btn-primary"
+                            className={playerCount < 4 ? 'btn-ghost' : 'btn-primary'}
                             busyLabel="กำลังเริ่ม..."
                             onClick={() => onStart(match.id)}
                             disabled={playerCount < 4}
@@ -205,8 +219,14 @@ export default function CourtBoard({
                       className="btn-primary"
                       busyLabel="กำลังจับคู่..."
                       onClick={() => onAssign(court.id)}
-                      disabled={waitingCount < 4}
-                      title={waitingCount < 4 ? 'ต้องมีผู้เล่นรอคิวอย่างน้อย 4 คน' : ''}
+                      disabled={!live || waitingCount < 4}
+                      title={
+                        !live
+                          ? 'กดเริ่มวันเล่นก่อน'
+                          : waitingCount < 4
+                            ? 'ต้องมีผู้เล่นรอคิวอย่างน้อย 4 คน'
+                            : ''
+                      }
                     >
                       จับคู่ลงคอร์ต
                     </AsyncButton>

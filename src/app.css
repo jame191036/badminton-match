@@ -2329,6 +2329,11 @@
 
   .frozen-grid { gap: 14px 20px; }
   .frozen-grid li { flex: 1 1 40%; }
+
+  /* แท็บหน้าวันเล่นมี 5 อัน — ลด padding ให้พอดีจอ ไม่งั้นแท็บท้าย (ประวัติ)
+     ตกขอบไปโดยไม่มีอะไรบอกว่าเลื่อนดูได้ */
+  .tab-bar { gap: 2px; padding: 3px; }
+  .tab-btn { padding: 10px 6px; gap: 4px; font-size: 0.88rem; }
 }
 
 /* มือถือเครื่องเล็ก */
