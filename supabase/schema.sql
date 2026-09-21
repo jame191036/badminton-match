@@ -27,7 +27,7 @@ create extension if not exists "pgcrypto"; -- สำหรับ gen_random_uuid
 drop view if exists
   v_waiting_queue, v_court_board, v_match_history, v_billing_summary,
   v_session_player_stats, v_session_summary, v_pair_history,
-  v_club_days, v_member_stats, v_my_clubs, v_session_archive cascade;
+  v_club_days, v_member_stats, v_my_clubs, v_club_ranking, v_session_archive cascade;
 
 drop table if exists
   match_players, matches, courts, players, sessions,
@@ -360,7 +360,13 @@ create table matches (
                check (status in ('pending', 'playing', 'done')),
   started_at timestamptz,    -- null ระหว่าง pending
   ended_at   timestamptz,
-  created_at timestamptz not null default now()
+  -- แต้มไม่บังคับ: ไม่กรอกก็จบเกมได้ เกมนั้นแค่ไม่ถูกนับแพ้/ชนะ
+  -- แบดไม่มีเสมอ แต้มเท่ากันจึงไม่ยอม (ไม่งั้นตัดสินผู้ชนะไม่ได้)
+  score_a    smallint check (score_a between 0 and 99),
+  score_b    smallint check (score_b between 0 and 99),
+  created_at timestamptz not null default now(),
+  constraint matches_score_both check ((score_a is null) = (score_b is null)),
+  constraint matches_score_no_tie check (score_a is null or score_a <> score_b)
 );
 
 create index idx_matches_session on matches(session_id);
@@ -531,6 +537,8 @@ select
   m.court_name,
   m.started_at,
   m.ended_at,
+  m.score_a,
+  m.score_b,
   array_agg(mp.player_name) filter (where mp.team = 'A') as team_a_names,
   array_agg(mp.player_name) filter (where mp.team = 'B') as team_b_names
 from matches m
@@ -584,7 +592,12 @@ select
   p.status,
   p.paying,
   count(m.id)                                                           as games,
-  coalesce(sum(extract(epoch from (m.ended_at - m.started_at))), 0) / 60 as minutes
+  coalesce(sum(extract(epoch from (m.ended_at - m.started_at))), 0) / 60 as minutes,
+  -- แพ้/ชนะนับเฉพาะเกมที่กรอกแต้ม (ฝั่งเราแต้มมากกว่า = ชนะ)
+  count(m.id) filter (where m.score_a is not null and (mp.team = 'A') =  (m.score_a > m.score_b)) as wins,
+  count(m.id) filter (where m.score_a is not null and (mp.team = 'A') <> (m.score_a > m.score_b)) as losses,
+  coalesce(sum(case when mp.team = 'A' then m.score_a - m.score_b else m.score_b - m.score_a end)
+           filter (where m.score_a is not null), 0) as point_diff
 from players p
 left join match_players mp on mp.player_id = p.id
 left join matches m
@@ -674,6 +687,25 @@ left join players p on p.member_id = mb.id and p.status <> 'absent'
 left join sessions s on s.id = p.session_id and s.status = 'done'
 group by mb.id;
 
+-- อันดับแพ้/ชนะของก๊วน รวมทุกวันเล่น นับเฉพาะเกมที่กรอกแต้ม
+-- ผูกกับสมาชิก (member_id) ข้ามวันได้ แขกขาจรไม่มี member จึงไม่ติดอันดับ
+-- ชื่อใช้ชื่อปัจจุบันในรายชื่อหลัก เปลี่ยนชื่อแล้วอันดับยังเป็นคนเดิม
+create or replace view v_club_ranking as
+select
+  s.club_id,
+  mb.id   as member_id,
+  mb.name,
+  count(*)                                                        as games,
+  count(*) filter (where (mp.team = 'A') =  (m.score_a > m.score_b)) as wins,
+  count(*) filter (where (mp.team = 'A') <> (m.score_a > m.score_b)) as losses,
+  sum(case when mp.team = 'A' then m.score_a - m.score_b else m.score_b - m.score_a end) as point_diff
+from match_players mp
+join matches m  on m.id = mp.match_id and m.status = 'done' and m.score_a is not null
+join sessions s on s.id = m.session_id
+join players p  on p.id = mp.player_id
+join members mb on mb.id = p.member_id
+group by s.club_id, mb.id, mb.name;
+
 -- ก๊วนที่ฉันเข้าถึงได้ พร้อมบทบาทและวันเล่นล่าสุด/ถัดไป
 create or replace view v_my_clubs as
 select
@@ -710,6 +742,7 @@ alter view v_session_summary      set (security_invoker = on);
 alter view v_pair_history         set (security_invoker = on);
 alter view v_club_days            set (security_invoker = on);
 alter view v_member_stats         set (security_invoker = on);
+alter view v_club_ranking         set (security_invoker = on);
 alter view v_my_clubs             set (security_invoker = on);
 
 

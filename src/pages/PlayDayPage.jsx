@@ -83,6 +83,7 @@ export default function PlayDayPage() {
     fillMatch,
     cancelMatch,
     finishMatch,
+    setMatchScore,
   } = useBadmintonData(sessionId, day?.queueMode ?? 'sequential')
 
   const [headError, setHeadError] = useState('')
@@ -446,7 +447,12 @@ export default function PlayDayPage() {
           {activeTab === 'history' && (
             <section className="panel">
               <h2>ประวัติการแข่งขัน</h2>
-              <MatchHistory history={history} summary={summary} />
+              <MatchHistory
+                history={history}
+                summary={summary}
+                // แก้แต้มย้อนหลังได้เฉพาะระหว่างวัน — DB บังคับอีกชั้น (set_match_score)
+                onSetScore={canEdit && isLive ? setMatchScore : undefined}
+              />
             </section>
           )}
         </>

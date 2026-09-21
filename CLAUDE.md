@@ -9,7 +9,7 @@ npm run dev      # Vite dev server
 npm run build    # production build
 npm run preview  # serve the build
 npm run lint     # eslint .
-npm run check    # assert-based self-check of src/utils/pairing.js
+npm run check    # assert-based self-check of src/utils/pairing.js and ranking.js
 ```
 
 No test framework is set up in this repo.
@@ -38,11 +38,13 @@ Auth is email + password (`useAuth`), with a reset-password flow: `onAuthStateCh
 - Single-table writes go through `supabase.from(...)`; anything touching multiple tables goes through an RPC in `supabase/functions.sql` so it is one transaction.
 - `match_players` has no `session_id` column, so its subscription has no filter and fires for all rows; `refetchAll` filters.
 
-**Pairing logic is pure and isolated** in `src/utils/pairing.js` — keep it that way; it is the only part of the app testable without a database. Skill is 1–3 and `SKILL_LEVELS` here is the single source of the labels.
+**Pairing logic is pure and isolated** in `src/utils/pairing.js` — keep it that way; it and `src/utils/ranking.js` are the only parts of the app testable without a database. Skill is 1–3 and `SKILL_LEVELS` here is the single source of the labels.
 
 `pickNextMatch(waiting, { mode, pairStats })` has two modes, chosen by `sessions.queue_mode`:
 - `sequential` — sort by `gamesPlayed` then `queuedAt`, take the first 4, and pick the 2v2 split with the smallest skill-sum gap.
 - `rotate` — `fairPool` first drops anyone who has played more games than the 4th-least-played waiting player, then takes the first `ROTATE_WINDOW` (8) of that fair ordering, enumerates every choice of 4 and every 2v2 split, and scores each with the `WEIGHT` table: repeat partners cost most, then repeat opponents, then skill gap, then how far down the queue it reached. Tune by editing `WEIGHT`.
+
+  `rotate` is the default for new days. `sequential` requeues the four who finished together as a group, so with a court-multiple of players (8, 12, 16) the same foursomes — and the same partners — repeat all day; a simulated 12-player day gave everyone a single partner ten times over. `WEIGHT.skillGap` is 4 (was 2): in the same simulations it cut the average team skill gap by about a third without losing partner variety.
 
   Candidate sets are compared **lexicographically — total games played first, `WEIGHT` score only as the tie-break.** Do not fold games-played into the weighted score: a player who has already partnered everyone present always costs a repeat-partner penalty, which outweighs any skip penalty, so a weighted sum skips them game after game. `sequential` mode is the fallback whenever `pairStats` is empty and is unaffected by any of this.
 
@@ -86,13 +88,15 @@ Non-obvious invariants to preserve when changing SQL:
 
 **Match lifecycle:** `assign_court` creates the match as `pending` with `started_at` null — pairing does not start the clock. `start_match` (requires exactly 4 players) moves it to `playing` and stamps `started_at`; `finish_match` moves it to `done`. While `pending`, `substitute_player` deletes a player's `match_players` row, sets them `resting`, and pulls the next waiting player into the same team. That deletion is exactly why a substituted player is not credited with the game — `finish_match` only touches rows still present, so no "did they actually play" flag is needed anywhere. Preserve that property when changing either function. `cancel_match` exists so a court cannot get stuck `pending` when a substitution finds no replacement; `fill_match` tops such a match back up from the queue once someone is waiting again (same queue order as `substitute_player`), and `start_match` counts only rows whose `player_id` is not null.
 
+**Scores are optional.** `matches.score_a`/`score_b` are both null or both set, 0–99, never equal (badminton has no draw); `assert_valid_score` gives the Thai messages and the table constraints back it up. `finish_match(match, a, b)` takes them at the end of a game, `set_match_score` corrects them afterwards but only while the day is `playing` — same "a closed day is history" rule as `rename_court`. A game without a score still counts as played; it just stays out of win/loss. Wins, losses and point difference come from `v_session_player_stats` (per day) and `v_club_ranking` (per club, per member — guests have no `member_id` so they are not ranked). The ordering rule lives once in `byRanking` in `ranking.js`: at least `MIN_RANKED_GAMES` scored games first, then win rate, wins, point difference — without the threshold one lucky 1–0 tops everyone.
+
 `assign_court` locks the four player rows and refuses unless all four are distinct, split 2/2, and still `waiting`. The client pairs from its own snapshot, so two quick taps on different courts (or two phones) would otherwise put the same people on two courts — the check has to live in the RPC, not the UI.
 
 Note `players.status = 'playing'` means "assigned to a court", including a `pending` match not yet started — it keeps them out of the waiting pool and out of substitution picks.
 
 All views are declared `security_invoker = on` so RLS on the underlying tables actually applies — without it a view runs as its owner and any authenticated user could read another owner's session by guessing its id. Keep that setting on any new view.
 
-Views `v_match_history`, `v_session_player_stats`, `v_session_summary`, `v_club_days`, `v_my_clubs` and `v_member_stats` are queried. `v_club_days` is the club's calendar — for a `done` day it reads the frozen `final_*` columns and for any other day it shows a live estimate; never make the `done` branch recompute. The list of people a club is shared with is an RPC (`list_club_members`), not a view, because `authenticated` cannot select from `auth.users` and `security_invoker` would therefore fail.
+Views `v_match_history`, `v_session_player_stats`, `v_session_summary`, `v_club_days`, `v_my_clubs`, `v_member_stats` and `v_club_ranking` are queried. `v_club_days` is the club's calendar — for a `done` day it reads the frozen `final_*` columns and for any other day it shows a live estimate; never make the `done` branch recompute. The list of people a club is shared with is an RPC (`list_club_members`), not a view, because `authenticated` cannot select from `auth.users` and `security_invoker` would therefore fail.
 
 Minutes played are derived from `matches.started_at`/`ended_at` in `v_session_player_stats` and merged onto players as `minutesPlayed` — `players.games_played` stays the column that drives queue order. Billing is recomputed client-side in `BillingPanel.jsx` and must stay in agreement with `v_billing_summary`:
 

@@ -928,11 +928,41 @@ end;
 $$;
 
 -- ------------------------------------------------------------
+-- ตรวจแต้มก่อนบันทึก — ใช้ร่วมกันทั้งตอนจบเกมและตอนแก้แต้มย้อนหลัง
+-- ตาราง matches มี check constraint กันอยู่แล้ว ตรงนี้มีไว้ให้ได้ข้อความไทย
+-- ------------------------------------------------------------
+create or replace function assert_valid_score(p_score_a int, p_score_b int)
+returns void
+language plpgsql
+immutable
+as $$
+begin
+  if (p_score_a is null) <> (p_score_b is null) then
+    raise exception 'ใส่แต้มให้ครบทั้งสองฝั่ง หรือเว้นว่างทั้งคู่';
+  end if;
+  if p_score_a < 0 or p_score_b < 0 or p_score_a > 99 or p_score_b > 99 then
+    raise exception 'แต้มต้องอยู่ระหว่าง 0 ถึง 99';
+  end if;
+  if p_score_a = p_score_b then
+    raise exception 'แต้มเสมอกันไม่ได้ ต้องมีฝั่งที่ชนะ';
+  end if;
+end;
+$$;
+
+-- ------------------------------------------------------------
 -- จบเกม: ปิด match, คืนผู้เล่นเข้าคิว, +1 เกมที่เล่น, ไปต่อท้ายคิว
 -- นับเกมให้เฉพาะคนที่ยังอยู่ใน match_players ตอนจบ
 -- (คนที่ถูกสลับออกไปก่อนเริ่มจึงไม่ถูกนับ — ดู substitute_player)
+--
+-- แต้มไม่บังคับ (null ทั้งคู่ = ไม่ได้จด) เกมยังนับตามปกติ แค่ไม่เข้าตารางแพ้/ชนะ
 -- ------------------------------------------------------------
-create or replace function finish_match(p_match_id uuid)
+drop function if exists finish_match(uuid);
+
+create or replace function finish_match(
+  p_match_id uuid,
+  p_score_a int default null,
+  p_score_b int default null
+)
 returns void
 language plpgsql
 security definer
@@ -947,8 +977,10 @@ begin
     raise exception 'ไม่พบเกมนี้ หรือไม่มีสิทธิ์แก้ไข';
   end if;
 
+  perform assert_valid_score(p_score_a, p_score_b);
+
   update matches
-  set ended_at = now(), status = 'done'
+  set ended_at = now(), status = 'done', score_a = p_score_a, score_b = p_score_b
   where id = p_match_id and status = 'playing';
 
   if not found then
@@ -963,6 +995,33 @@ begin
     select player_id from match_players
     where match_id = p_match_id and player_id is not null
   );
+end;
+$$;
+
+-- ------------------------------------------------------------
+-- แก้/เพิ่ม/ลบแต้มของเกมที่จบแล้ว (จดผิด หรือลืมจดตอนกดจบ)
+-- ทำได้เฉพาะวันที่ยังเล่นอยู่ — วันที่จบแล้วประวัติต้องนิ่ง (กติกาเดียวกับ rename_court)
+-- ------------------------------------------------------------
+create or replace function set_match_score(p_match_id uuid, p_score_a int, p_score_b int)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_session_id uuid;
+begin
+  select m.session_id into v_session_id
+  from matches m join sessions s on s.id = m.session_id
+  where m.id = p_match_id and m.status = 'done' and s.status = 'playing';
+
+  if v_session_id is null or not can_edit_session(v_session_id) then
+    raise exception 'แก้แต้มไม่ได้ — ต้องเป็นเกมที่จบแล้วในวันที่ยังเล่นอยู่ และต้องมีสิทธิ์จัดก๊วนนี้';
+  end if;
+
+  perform assert_valid_score(p_score_a, p_score_b);
+
+  update matches set score_a = p_score_a, score_b = p_score_b where id = p_match_id;
 end;
 $$;
 
@@ -1072,6 +1131,7 @@ grant execute on function start_match(uuid) to authenticated;
 grant execute on function substitute_player(uuid, uuid) to authenticated;
 grant execute on function cancel_match(uuid) to authenticated;
 grant execute on function fill_match(uuid) to authenticated;
-grant execute on function finish_match(uuid) to authenticated;
+grant execute on function finish_match(uuid, int, int) to authenticated;
+grant execute on function set_match_score(uuid, int, int) to authenticated;
 grant execute on function remove_court(uuid) to authenticated;
 grant execute on function rename_court(uuid, text) to authenticated;

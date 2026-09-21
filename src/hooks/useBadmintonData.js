@@ -48,7 +48,7 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
         .eq('session_id', sessionId)
         .is('ended_at', null),
       supabase.from('v_match_history').select('*').eq('session_id', sessionId).limit(30),
-      supabase.from('v_session_player_stats').select('player_id, games, minutes').eq('session_id', sessionId),
+      supabase.from('v_session_player_stats').select('player_id, games, minutes, wins, losses, point_diff').eq('session_id', sessionId),
       supabase.from('v_session_summary').select('*').eq('session_id', sessionId).single(),
       supabase.from('v_pair_history').select('*').eq('session_id', sessionId),
     ])
@@ -72,6 +72,10 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
         playersRes.data.map((row) => ({
           ...mapPlayer(row),
           minutesPlayed: Math.round(Number(statsById.get(row.id)?.minutes ?? 0)),
+          // แพ้/ชนะนับเฉพาะเกมที่กรอกแต้ม
+          wins: statsById.get(row.id)?.wins ?? 0,
+          losses: statsById.get(row.id)?.losses ?? 0,
+          pointDiff: statsById.get(row.id)?.point_diff ?? 0,
         }))
       )
     }
@@ -132,6 +136,8 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
             startTime: clock(h.started_at),
             durationSeconds: seconds,
             courtName: h.court_name,
+            scoreA: h.score_a,
+            scoreB: h.score_b,
             teamA: h.team_a_names ?? [],
             teamB: h.team_b_names ?? [],
           }
@@ -357,9 +363,31 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
     [run],
   )
 
+  // แต้มไม่บังคับ — ส่ง null ทั้งคู่ = จบเกมแบบไม่จดแต้ม
   const finishMatch = useCallback(
-    (matchId) => run(supabase.rpc('finish_match', { p_match_id: matchId })),
+    (matchId, scoreA = null, scoreB = null) =>
+      run(
+        supabase.rpc('finish_match', {
+          p_match_id: matchId,
+          p_score_a: scoreA,
+          p_score_b: scoreB,
+        }),
+      ),
     [run],
+  )
+
+  // แก้แต้มย้อนหลังจากหน้าประวัติ — โยน error ให้ช่องกรอกแสดงเอง (แบบ renameCourt)
+  const setMatchScore = useCallback(
+    async (matchId, scoreA, scoreB) => {
+      const { error: err } = await supabase.rpc('set_match_score', {
+        p_match_id: matchId,
+        p_score_a: scoreA,
+        p_score_b: scoreB,
+      })
+      if (err) throw new Error(err.message)
+      await refetchAll()
+    },
+    [refetchAll],
   )
 
   return {
@@ -387,5 +415,6 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
     fillMatch,
     cancelMatch,
     finishMatch,
+    setMatchScore,
   }
 }

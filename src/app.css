@@ -441,6 +441,16 @@
 
 .btn-finish { width: 100%; }
 
+/* แต้มก่อนจบเกม — ช่องเล็กสองช่องตรงกลาง ฝั่ง A ซ้าย ฝั่ง B ขวา ตรงกับทีมบนการ์ด */
+.finish-form { display: flex; flex-direction: column; gap: 8px; }
+.score-inputs { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.score-inputs input { width: 72px; text-align: center; font-size: 1.05rem; }
+.score-dash { color: var(--text-faint); font-weight: 600; }
+
+/* แต้มในประวัติ — ฝั่งที่ชนะตัวหนา */
+.history-score { flex: none; font-weight: 600; color: var(--text-muted); }
+.team-won { font-weight: 700; color: var(--court-dark); }
+
 /* Stats */
 .stats-summary {
   display: grid;
@@ -495,6 +505,7 @@
 .stats-status.status-resting { color: var(--coral); }
 
 .stats-games { min-width: 52px; text-align: right; }
+.stats-record { min-width: 56px; text-align: right; font-weight: 600; }
 .stats-minutes { min-width: 92px; text-align: right; color: var(--text-faint); font-size: 0.82rem; }
 
 /* ---------- หัวตาราง (สถิติ / ประวัติ) ---------- */

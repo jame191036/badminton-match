@@ -4,6 +4,7 @@ import { useClubDays } from '../hooks/useClubDays'
 import { usePastDays } from '../hooks/usePastDays'
 import ClubSharePanel from '../components/ClubSharePanel'
 import ClubSettingsPanel from '../components/ClubSettingsPanel'
+import ClubRanking from '../components/ClubRanking'
 import { SkeletonHead, SkeletonList } from '../components/Skeleton'
 import { clock, thaiDate, todayISO } from '../utils/date'
 import { useConfirm } from '../hooks/useConfirm'
@@ -118,6 +119,7 @@ export default function ClubPage() {
         <div className="tab-bar" role="tablist">
           {[
             { id: 'days', label: 'วันเล่น' },
+            { id: 'ranking', label: 'อันดับ' },
             { id: 'share', label: 'คนในก๊วน' },
             { id: 'settings', label: 'ตั้งค่า' },
           ].map((t) => (
@@ -136,7 +138,9 @@ export default function ClubPage() {
 
         {actionError && <p className="auth-error">{actionError}</p>}
 
-        {tab === 'share' ? (
+        {tab === 'ranking' ? (
+          <ClubRanking clubId={clubId} />
+        ) : tab === 'share' ? (
           <ClubSharePanel clubId={clubId} isOwner={club.role === 'owner'} />
         ) : tab === 'settings' ? (
           <ClubSettingsPanel

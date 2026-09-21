@@ -46,6 +46,53 @@ function TeamSide({ team, label, onSubstitute }) {
   )
 }
 
+const toScore = (v) => (v === '' ? null : Number(v))
+
+/**
+ * จบเกม พร้อมช่องแต้มสองฝั่ง — ไม่บังคับกรอก เว้นว่างทั้งคู่ก็จบได้
+ * (บางก๊วนไม่จดแต้ม ถ้าบังคับจะกลายเป็นขั้นตอนเกินที่ทุกคนกดข้าม)
+ * ถ้ากรอก ต้องครบสองฝั่งและไม่เสมอ — DB ตรวจและตอบเป็นข้อความไทย
+ */
+function FinishForm({ onFinish }) {
+  const [a, setA] = useState('')
+  const [b, setB] = useState('')
+
+  return (
+    <div className="finish-form">
+      <div className="score-inputs">
+        <input
+          type="number"
+          min="0"
+          max="99"
+          inputMode="numeric"
+          placeholder="A"
+          aria-label="แต้มฝั่ง A"
+          value={a}
+          onChange={(e) => setA(e.target.value)}
+        />
+        <span className="score-dash">–</span>
+        <input
+          type="number"
+          min="0"
+          max="99"
+          inputMode="numeric"
+          placeholder="B"
+          aria-label="แต้มฝั่ง B"
+          value={b}
+          onChange={(e) => setB(e.target.value)}
+        />
+      </div>
+      <AsyncButton
+        className="btn-primary btn-finish"
+        busyLabel="กำลังจบเกม..."
+        onClick={() => onFinish(toScore(a), toScore(b))}
+      >
+        {a === '' && b === '' ? 'จบเกม → คืนคิว' : 'บันทึกแต้ม + จบเกม'}
+      </AsyncButton>
+    </div>
+  )
+}
+
 export default function CourtBoard({
   courts,
   readOnly = false,
@@ -195,13 +242,7 @@ export default function CourtBoard({
                     </>
                   ) : (
                     !readOnly && (
-                      <AsyncButton
-                        className="btn-primary btn-finish"
-                        busyLabel="กำลังจบเกม..."
-                        onClick={() => onFinish(match.id)}
-                      >
-                        จบเกม → คืนคิว
-                      </AsyncButton>
+                      <FinishForm onFinish={(a, b) => onFinish(match.id, a, b)} />
                     )
                   )}
                 </>
