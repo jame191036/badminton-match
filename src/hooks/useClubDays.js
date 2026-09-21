@@ -31,7 +31,7 @@ function dayParams(payload) {
     p_hourly_rate: payload.hourlyRate ?? null,
     p_shuttle_price: payload.shuttlePrice ?? null,
     p_shuttle_count: payload.shuttleCount ?? 0,
-    p_queue_mode: payload.queueMode ?? 'sequential',
+    p_queue_mode: payload.queueMode ?? 'rotate',
     p_courts: payload.courts ?? null,
     p_note: payload.note || null,
   }

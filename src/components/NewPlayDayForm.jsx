@@ -51,7 +51,7 @@ export default function NewPlayDayForm({
   const [shuttleCount, setShuttleCount] = useState(initial?.shuttleCount ?? '')
   const [hourlyRate, setHourlyRate] = useState(initial?.hourlyRate ?? '')
   const [shuttlePrice, setShuttlePrice] = useState(initial?.shuttlePrice ?? '')
-  const [queueMode, setQueueMode] = useState(initial?.queueMode ?? 'sequential')
+  const [queueMode, setQueueMode] = useState(initial?.queueMode ?? 'rotate')
   const [memberQuery, setMemberQuery] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -80,7 +80,7 @@ export default function NewPlayDayForm({
         setEndTime(clock(d.end_time))
         setHourlyRate(d.hourly_rate ? String(d.hourly_rate) : '')
         setShuttlePrice(d.shuttle_price ? String(d.shuttle_price) : '')
-        setQueueMode(d.queue_mode ?? 'sequential')
+        setQueueMode(d.queue_mode ?? 'rotate')
         if (Array.isArray(d.courts) && d.courts.length > 0) {
           setCourts(d.courts.map((c) => ({ name: c.name, hours: String(c.hours ?? '') })))
         }
