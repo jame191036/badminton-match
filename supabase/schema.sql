@@ -523,29 +523,6 @@ create trigger trg_shuttle_models_lock_brand
 -- Views
 -- ============================================================
 
--- คิวรอลงคอร์ต: เรียงตาม games_played แล้ว queue_seq (เหมือน pickNextMatch)
-create or replace view v_waiting_queue as
-select *
-from players
-where status = 'waiting'
-order by session_id, games_played, queue_seq;
-
--- สถานะคอร์ต + แมตช์ที่ยังไม่จบ (ถ้ามี)
-create or replace view v_court_board as
-select
-  c.id         as court_id,
-  c.session_id,
-  c.name       as court_name,
-  c.sort_order,
-  c.hours,
-  m.id         as match_id,
-  m.status     as match_status,
-  m.started_at
-from courts c
-left join matches m
-  on m.court_id = c.id and m.ended_at is null
-order by c.session_id, c.sort_order;
-
 -- ประวัติการแข่งขัน พร้อมชื่อผู้เล่นสองทีม
 create or replace view v_match_history as
 select
@@ -726,8 +703,6 @@ join club_access a on a.club_id = c.id and a.user_id = auth.uid();
 -- view รันด้วยสิทธิ์เจ้าของ view เป็นค่าเริ่มต้น ซึ่งข้าม RLS
 -- เปิด security_invoker ให้ใช้สิทธิ์ของคนเรียกแทน RLS จึงมีผลจริง
 -- *** view ใหม่ทุกตัวต้องตั้งค่านี้เสมอ ***
-alter view v_waiting_queue        set (security_invoker = on);
-alter view v_court_board          set (security_invoker = on);
 alter view v_match_history        set (security_invoker = on);
 alter view v_billing_summary      set (security_invoker = on);
 alter view v_session_player_stats set (security_invoker = on);

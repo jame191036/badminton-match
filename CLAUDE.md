@@ -9,6 +9,7 @@ npm run dev      # Vite dev server
 npm run build    # production build
 npm run preview  # serve the build
 npm run lint     # eslint .
+npm run check    # assert-based self-check of src/utils/pairing.js
 ```
 
 No test framework is set up in this repo.
@@ -25,7 +26,7 @@ Stack: React 19 + Vite (aliased to `rolldown-vite`) + Supabase (auth, Postgres, 
 
 ## Architecture
 
-**Layering is strict — respect it.** Components under `src/components/` are presentational only: they receive props and never import `supabase`. All data access lives in `src/hooks/`; `src/pages/` wires hooks to components.
+**Layering is strict — respect it.** Components under `src/components/` are presentational only: they receive props and never import `supabase`. All data access lives in `src/hooks/` (simple load-and-refetch hooks share `useLoad`); `src/pages/` wires hooks to components.
 
 Routes (`src/App.jsx`): `/` club list · `/master` master data (3 tabs) · `/club/:clubId` the club's days + sharing · `/club/:clubId/day/:sessionId` the board for one day. `AppLayout` holds the header and passes the signed-in `user` down through the router outlet context.
 
@@ -40,7 +41,7 @@ Auth is email + password (`useAuth`), with a reset-password flow: `onAuthStateCh
 **Pairing logic is pure and isolated** in `src/utils/pairing.js` — keep it that way; it is the only part of the app testable without a database. Skill is 1–3 and `SKILL_LEVELS` here is the single source of the labels.
 
 `pickNextMatch(waiting, { mode, pairStats })` has two modes, chosen by `sessions.queue_mode`:
-- `sequential` — sort by `gamesPlayed` then `queuedAt`, take the first 4, and split with `bestTeamSplit` (smallest skill-sum gap).
+- `sequential` — sort by `gamesPlayed` then `queuedAt`, take the first 4, and pick the 2v2 split with the smallest skill-sum gap.
 - `rotate` — `fairPool` first drops anyone who has played more games than the 4th-least-played waiting player, then takes the first `ROTATE_WINDOW` (8) of that fair ordering, enumerates every choice of 4 and every 2v2 split, and scores each with the `WEIGHT` table: repeat partners cost most, then repeat opponents, then skill gap, then how far down the queue it reached. Tune by editing `WEIGHT`.
 
   Candidate sets are compared **lexicographically — total games played first, `WEIGHT` score only as the tie-break.** Do not fold games-played into the weighted score: a player who has already partnered everyone present always costs a repeat-partner penalty, which outweighs any skip penalty, so a weighted sum skips them game after game. `sequential` mode is the fallback whenever `pairStats` is empty and is unaffected by any of this.
@@ -65,7 +66,7 @@ Master data belongs to the **club owner's account**, not to the club, so everyon
 
 ## Database (`supabase/`)
 
-`schema.sql` and `functions.sql` are the source of truth for a fresh database and are applied manually in the Supabase SQL editor. Changes to an existing database go in `supabase/migrations/NNN_name.sql` starting at `101_`, also run by hand — keep both in sync when altering the schema. (`migrations/001`–`005` are pre-v2 and must never be run against the current schema; see the README there.)
+`schema.sql` and `functions.sql` are the source of truth for a fresh database and are applied manually in the Supabase SQL editor. Changes to an existing database go in `supabase/migrations/NNN_name.sql` starting at `101_`, also run by hand — keep both in sync when altering the schema. (The pre-v2 `001`–`005` migrations were deleted; they live only in git history.)
 
 Shape: `clubs → sessions → players / courts / matches → match_players`, with master tables `members` / `venues` / `shuttle_brands` hanging off `auth.users`. RLS on every table.
 
@@ -89,7 +90,7 @@ Note `players.status = 'playing'` means "assigned to a court", including a `pend
 
 All views are declared `security_invoker = on` so RLS on the underlying tables actually applies — without it a view runs as its owner and any authenticated user could read another owner's session by guessing its id. Keep that setting on any new view.
 
-Views `v_waiting_queue`, `v_court_board` exist but the client does not use them; `v_match_history`, `v_session_player_stats`, `v_session_summary`, `v_club_days`, `v_my_clubs` and `v_member_stats` are queried. `v_club_days` is the club's calendar — for a `done` day it reads the frozen `final_*` columns and for any other day it shows a live estimate; never make the `done` branch recompute. The list of people a club is shared with is an RPC (`list_club_members`), not a view, because `authenticated` cannot select from `auth.users` and `security_invoker` would therefore fail.
+Views `v_match_history`, `v_session_player_stats`, `v_session_summary`, `v_club_days`, `v_my_clubs` and `v_member_stats` are queried. `v_club_days` is the club's calendar — for a `done` day it reads the frozen `final_*` columns and for any other day it shows a live estimate; never make the `done` branch recompute. The list of people a club is shared with is an RPC (`list_club_members`), not a view, because `authenticated` cannot select from `auth.users` and `security_invoker` would therefore fail.
 
 Minutes played are derived from `matches.started_at`/`ended_at` in `v_session_player_stats` and merged onto players as `minutesPlayed` — `players.games_played` stays the column that drives queue order. Billing is recomputed client-side in `BillingPanel.jsx` and must stay in agreement with `v_billing_summary`:
 

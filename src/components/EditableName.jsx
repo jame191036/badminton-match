@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Pencil } from 'lucide-react'
 
 /**
  * ชื่อในลิสต์ที่กดแก้ไขได้ — ใช้ร่วมกันทั้งผู้เล่น สนาม และยี่ห้อลูกแบด
@@ -73,10 +74,7 @@ export default function EditableName({ fields, onSave, label = 'ชื่อ', r
           aria-label={`แก้ไข${label}`}
           title={`แก้ไข${label}`}
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 20h9" />
-            <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
-          </svg>
+          <Pencil strokeWidth={1.8} aria-hidden="true" />
         </button>
       </>
     )

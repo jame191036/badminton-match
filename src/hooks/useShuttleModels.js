@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { useLoad } from './useLoad'
 
 /**
  * รุ่นลูกแบดทั้งหมดของยี่ห้อชุดหนึ่ง ดึงมาทีเดียวแล้วจัดกลุ่มตาม brand_id
@@ -9,51 +10,18 @@ import { supabase } from '../lib/supabaseClient'
  * ฝั่งนี้จึงกรองด้วย brand_id ที่ส่งเข้ามาอย่างเดียวพอ
  */
 export function useShuttleModels(brandIds) {
-  const [models, setModels] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [reloadKey, setReloadKey] = useState(0)
-
-  const refetch = useCallback(() => setReloadKey((k) => k + 1), [])
   const key = brandIds.join(',')
-
-  useEffect(() => {
-    let alive = true
-
-    async function load() {
-      if (!key) {
-        if (alive) {
-          setModels([])
-          setLoading(false)
-        }
-        return
-      }
-
-      const { data, error: err } = await supabase
-        .from('shuttle_models')
-        .select('*')
-        .in('brand_id', key.split(','))
-        .order('name')
-
-      if (!alive) return
-      if (err) setError(err.message)
-      else {
-        setModels(data ?? [])
-        setError('')
-      }
-      setLoading(false)
-    }
-
-    load()
-    return () => {
-      alive = false
-    }
-  }, [key, reloadKey])
-
-  const byBrand = useCallback(
-    (brandId) => models.filter((m) => m.brand_id === brandId),
-    [models],
+  const fetcher = useCallback(
+    () =>
+      key
+        ? supabase.from('shuttle_models').select('*').in('brand_id', key.split(',')).order('name')
+        : { data: [] },
+    [key],
   )
+  const { data, loading, error, refetch } = useLoad(fetcher)
+  const models = data ?? []
+
+  const byBrand = (brandId) => models.filter((m) => m.brand_id === brandId)
 
   const addModel = useCallback(
     async (brandId, values) => {

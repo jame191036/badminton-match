@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useOutletContext } from 'react-router-dom'
 import { useClubs } from '../hooks/useClubs'
 import { SkeletonList } from '../components/Skeleton'
+import { thaiDate } from '../utils/date'
 
 const ROLE_LABEL = {
   owner: 'เจ้าของ',
@@ -9,14 +10,7 @@ const ROLE_LABEL = {
   viewer: 'ดูอย่างเดียว',
 }
 
-function formatThaiDate(value) {
-  if (!value) return null
-  return new Date(`${value}T00:00:00`).toLocaleDateString('th-TH', {
-    day: 'numeric',
-    month: 'short',
-    year: '2-digit',
-  })
-}
+const formatThaiDate = (v) => thaiDate(v, { day: 'numeric', month: 'short', year: '2-digit' })
 
 export default function ClubListPage() {
   const { user } = useOutletContext()

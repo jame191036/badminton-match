@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import { ChevronDown } from 'lucide-react'
 
 /**
  * ช่องเลือกแบบพิมพ์ค้นหาได้ ใช้แทน <select> เวลาตัวเลือกเยอะ
@@ -13,10 +14,7 @@ export default function SearchSelect({
   options,
   onChange,
   placeholder = 'เลือก',
-  emptyLabel = 'ไม่ระบุ',
-  noResultLabel = 'ไม่พบที่ค้นหา',
   disabled = false,
-  allowEmpty = true,
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -33,7 +31,7 @@ export default function SearchSelect({
     : options
 
   // รวมแถว "ไม่ระบุ" เข้ามาเป็นแถวหนึ่งของรายการ ลูกศรจะได้เลื่อนถึงมันด้วย
-  const rows = allowEmpty && !q ? [{ value: '', label: `— ${emptyLabel} —` }, ...filtered] : filtered
+  const rows = !q ? [{ value: '', label: '— ไม่ระบุ —' }, ...filtered] : filtered
 
   // ปิดเมื่อคลิกที่อื่น — ไม่งั้นรายการจะค้างเปิดทับส่วนอื่นของฟอร์ม
   useEffect(() => {
@@ -101,9 +99,7 @@ export default function SearchSelect({
         onClick={() => toggle(!open)}
       >
         <span className={selected ? '' : 'is-placeholder'}>{selected?.label ?? placeholder}</span>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="m6 9 6 6 6-6" />
-        </svg>
+        <ChevronDown aria-hidden="true" />
       </button>
 
       {open && (
@@ -146,7 +142,7 @@ export default function SearchSelect({
               </li>
             ))}
 
-            {rows.length === 0 && <li className="search-select-empty">{noResultLabel}</li>}
+            {rows.length === 0 && <li className="search-select-empty">ไม่พบที่ค้นหา</li>}
           </ul>
         </div>
       )}

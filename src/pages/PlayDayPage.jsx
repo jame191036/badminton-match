@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, X } from 'lucide-react'
 import { usePlayDay } from '../hooks/usePlayDay'
 import { useBadmintonData } from '../hooks/useBadmintonData'
 import PlayerForm from '../components/PlayerForm'
@@ -13,7 +13,7 @@ import BillingPanel from '../components/BillingPanel'
 import { SkeletonCourts, SkeletonHead, SkeletonQueue } from '../components/Skeleton'
 import { useConfirm } from '../hooks/useConfirm'
 import AsyncButton from '../components/AsyncButton'
-import { hoursBetween } from '../utils/date'
+import { clock, hoursBetween, thaiDate } from '../utils/date'
 
 // count คืน null = ไม่ต้องโชว์ตัวเลขบนแท็บ
 // แท็บผู้เล่นโชว์ "จำนวนคนที่รอคิว" ไม่ใช่จำนวนคนทั้งหมด เพราะตอนอยู่แท็บคอร์ต
@@ -33,17 +33,8 @@ const STATUS_LABEL = {
   cancelled: 'ยกเลิกแล้ว',
 }
 
-function formatThaiDate(value) {
-  if (!value) return ''
-  return new Date(`${value}T00:00:00`).toLocaleDateString('th-TH', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  })
-}
-
-const clock = (t) => (t ? String(t).slice(0, 5) : '')
+const formatThaiDate = (v) =>
+  thaiDate(v, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 
 /** 3 → "3 ชม." / 2.5 → "2 ชม. 30 นาที" */
 function formatHoursLabel(hours) {
@@ -289,9 +280,7 @@ export default function PlayDayPage() {
                 clearSaveError()
               }}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <path d="M6 6l12 12M18 6 6 18" />
-              </svg>
+              <X aria-hidden="true" />
             </button>
           </div>
         )}

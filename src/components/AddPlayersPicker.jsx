@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useMembers } from '../hooks/useMembers'
 import SearchBox from './SearchBox'
 import AsyncButton from './AsyncButton'
-import { SKILL_LEVELS } from '../utils/pairing'
+import { skillLabel } from '../utils/pairing'
 
 /**
  * เลือกคนจากรายชื่อหลักเข้าวันเล่น — สำหรับคนที่มาเพิ่มหน้างาน
@@ -86,7 +86,7 @@ export default function AddPlayersPicker({ ownerId, players, onAdd }) {
                 >
                   <span>{m.name}</span>
                   <span className={`skill-chip skill-${m.skill}`}>
-                    {SKILL_LEVELS.find((s) => s.value === m.skill)?.label}
+                    {skillLabel(m.skill)}
                   </span>
                 </AsyncButton>
               ))}

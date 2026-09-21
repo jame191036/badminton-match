@@ -6,27 +6,16 @@ import { useShuttleModels } from '../hooks/useShuttleModels'
 import SearchSelect from './SearchSelect'
 import SearchBox from './SearchBox'
 import DatePicker from './DatePicker'
-import { QUEUE_MODES, SKILL_LEVELS } from '../utils/pairing'
-import { addDays, addHours, hoursBetween, todayISO } from '../utils/date'
+import { QUEUE_MODES, skillLabel } from '../utils/pairing'
+import { addDays, addHours, clock, hoursBetween, thaiDate, todayISO } from '../utils/date'
 
 // เวลาเริ่มที่ก๊วนแบดใช้กันจริง ๆ และความยาวที่จองกันบ่อย
 const START_PRESETS = ['17:00', '18:00', '19:00', '20:00']
 const DURATION_PRESETS = [1, 2, 3]
 
-function shortThaiDate(iso) {
-  return new Date(`${iso}T00:00:00`).toLocaleDateString('th-TH', {
-    day: 'numeric',
-    month: 'short',
-  })
-}
-
-function shortWeekday(iso) {
-  return new Date(`${iso}T00:00:00`).toLocaleDateString('th-TH', { weekday: 'short' })
-}
-
 const BLANK_COURT = { name: '', hours: '' }
 
-// ขนาด/ความหนาเส้นของไอคอนหัวข้อ ให้ตรงกับ SVG ที่เขียนมือไว้ที่อื่นในแอป
+// ขนาด/ความหนาเส้นของไอคอนหัวข้อ ให้ตรงกับไอคอนอื่นในแอป
 const ICON = { size: 19, strokeWidth: 1.8, className: 'form-section-icon', 'aria-hidden': true }
 
 /**
@@ -89,8 +78,8 @@ export default function NewPlayDayForm({
         setVenueId(d.venue_id ?? '')
         setBrandId(d.shuttle_brand_id ?? '')
         setModelId(d.shuttle_model_id ?? '')
-        setStartTime(d.start_time ? String(d.start_time).slice(0, 5) : '')
-        setEndTime(d.end_time ? String(d.end_time).slice(0, 5) : '')
+        setStartTime(clock(d.start_time))
+        setEndTime(clock(d.end_time))
         setHourlyRate(d.hourly_rate ? String(d.hourly_rate) : '')
         setShuttlePrice(d.shuttle_price ? String(d.shuttle_price) : '')
         setQueueMode(d.queue_mode ?? 'sequential')
@@ -179,13 +168,7 @@ export default function NewPlayDayForm({
   }
 
   // ---- สรุปบรรทัดเดียวของแต่ละส่วน ใช้ตอนพับอยู่ ----
-  const dateLabel = playDate
-    ? new Date(`${playDate}T00:00:00`).toLocaleDateString('th-TH', {
-        weekday: 'short',
-        day: 'numeric',
-        month: 'short',
-      })
-    : 'ยังไม่เลือกวัน'
+  const dateLabel = thaiDate(playDate, { weekday: 'short', day: 'numeric', month: 'short' }) || 'ยังไม่เลือกวัน'
   const timeLabel = [startTime, endTime].filter(Boolean).join('–')
 
   // ปุ่มลัดเลือกวัน — หนึ่งสัปดาห์เต็มนับจากวันนี้ เรียงตามวันจริง ไม่ใช่เรียงตามชื่อวัน
@@ -193,7 +176,11 @@ export default function NewPlayDayForm({
   const weekChips = Array.from({ length: 7 }, (_, i) => {
     const value = addDays(today, i)
     // ต่อวันที่ท้ายชื่อวัน ไม่งั้นไม่รู้ว่า "ส." คือเสาร์ไหน
-    return { label: shortWeekday(value), value, sub: shortThaiDate(value) }
+    return {
+      label: thaiDate(value, { weekday: 'short' }),
+      value,
+      sub: thaiDate(value, { day: 'numeric', month: 'short' }),
+    }
   })
 
   const duration = hoursBetween(startTime, endTime)
@@ -421,7 +408,7 @@ export default function NewPlayDayForm({
                     />
                     <span>{m.name}</span>
                     <span className={`skill-chip skill-${m.skill}`}>
-                      {SKILL_LEVELS.find((s) => s.value === m.skill)?.label}
+                      {skillLabel(m.skill)}
                     </span>
                   </label>
                 ))}

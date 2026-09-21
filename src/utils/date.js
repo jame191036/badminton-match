@@ -36,16 +36,18 @@ export function thaiMonthYear(yearMonth) {
   })
 }
 
-/** '2026-09-12' -> 'เสาร์ 12 ก.ย. 2569' */
-export function thaiFullDate(iso) {
+/** 'YYYY-MM-DD' -> วันที่ภาษาไทย ตาม options ของ toLocaleDateString (ว่าง = '') */
+export function thaiDate(iso, options) {
   if (!iso) return ''
-  return new Date(`${iso}T00:00:00`).toLocaleDateString('th-TH', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  })
+  return new Date(`${iso}T00:00:00`).toLocaleDateString('th-TH', options)
 }
+
+/** '2026-09-12' -> 'เสาร์ 12 ก.ย. 2569' */
+export const thaiFullDate = (iso) =>
+  thaiDate(iso, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+
+/** เวลาจาก DB ('19:00:00') -> '19:00' */
+export const clock = (t) => (t ? String(t).slice(0, 5) : '')
 
 /** เลื่อนเดือน: ('2026-09', 1) -> '2026-10' */
 export function addMonths(yearMonth, months) {

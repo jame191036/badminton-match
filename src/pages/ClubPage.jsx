@@ -5,7 +5,7 @@ import { usePastDays } from '../hooks/usePastDays'
 import ClubSharePanel from '../components/ClubSharePanel'
 import ClubSettingsPanel from '../components/ClubSettingsPanel'
 import { SkeletonHead, SkeletonList } from '../components/Skeleton'
-import { todayISO } from '../utils/date'
+import { clock, thaiDate, todayISO } from '../utils/date'
 import { useConfirm } from '../hooks/useConfirm'
 import AsyncButton from '../components/AsyncButton'
 
@@ -16,20 +16,12 @@ const STATUS_LABEL = {
   cancelled: 'ยกเลิก',
 }
 
-function formatThaiDate(value) {
-  if (!value) return ''
-  return new Date(`${value}T00:00:00`).toLocaleDateString('th-TH', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    year: '2-digit',
-  })
-}
+const formatThaiDate = (v) =>
+  thaiDate(v, { weekday: 'short', day: 'numeric', month: 'short', year: '2-digit' })
 
 function formatTimeRange(start, end) {
   if (!start && !end) return null
-  const trim = (t) => (t ? String(t).slice(0, 5) : '')
-  return `${trim(start)}${end ? `–${trim(end)}` : ''}`
+  return `${clock(start)}${end ? `–${clock(end)}` : ''}`
 }
 
 export default function ClubPage() {

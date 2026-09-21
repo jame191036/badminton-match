@@ -145,7 +145,7 @@ export default function CourtBoard({
                       team={match.teamA}
                       label="ฝั่ง A"
                       onSubstitute={
-                        isPending && !readOnly ? (pid) => onSubstitute(court.id, pid) : null
+                        isPending && !readOnly ? (pid) => onSubstitute(match.id, pid) : null
                       }
                     />
                     <div className="vs mono">VS</div>
@@ -153,7 +153,7 @@ export default function CourtBoard({
                       team={match.teamB}
                       label="ฝั่ง B"
                       onSubstitute={
-                        isPending && !readOnly ? (pid) => onSubstitute(court.id, pid) : null
+                        isPending && !readOnly ? (pid) => onSubstitute(match.id, pid) : null
                       }
                     />
                   </div>
@@ -171,14 +171,14 @@ export default function CourtBoard({
                           <AsyncButton
                             className="btn-primary"
                             busyLabel="กำลังเริ่ม..."
-                            onClick={() => onStart(court.id)}
+                            onClick={() => onStart(match.id)}
                             disabled={playerCount < 4}
                           >
                             เริ่มเกม
                           </AsyncButton>
                           <AsyncButton
                             className="btn-ghost btn-danger"
-                            onClick={() => onCancel(court.id)}
+                            onClick={() => onCancel(match.id)}
                           >
                             ยกเลิก
                           </AsyncButton>
@@ -190,7 +190,7 @@ export default function CourtBoard({
                       <AsyncButton
                         className="btn-primary btn-finish"
                         busyLabel="กำลังจบเกม..."
-                        onClick={() => onFinish(court.id)}
+                        onClick={() => onFinish(match.id)}
                       >
                         จบเกม → คืนคิว
                       </AsyncButton>

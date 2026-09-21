@@ -1,5 +1,20 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { useLoad } from './useLoad'
+
+function mapMember(m) {
+  return {
+    id: m.member_id,
+    name: m.name,
+    skill: m.default_skill,
+    note: m.note,
+    active: m.active,
+    daysPlayed: m.days_played ?? 0,
+    totalGames: m.total_games ?? 0,
+    totalMinutes: m.total_minutes ?? 0,
+    lastPlayedOn: m.last_played_on,
+  }
+}
 
 /**
  * รายชื่อผู้เล่นทั้งหมดของเจ้าของบัญชี (master) — เก็บรวมชุดเดียว ไม่แยกตามก๊วน
@@ -9,51 +24,14 @@ import { supabase } from '../lib/supabaseClient'
  * หน้านี้จึงเป็นแค่ที่จัดการรายชื่อล่วงหน้า ไม่ใช่ทางเดียวที่จะเพิ่มคนได้
  */
 export function useMembers(userId) {
-  const [members, setMembers] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [reloadKey, setReloadKey] = useState(0)
-
-  const refetch = useCallback(() => setReloadKey((k) => k + 1), [])
-
-  useEffect(() => {
-    if (!userId) return
-    let alive = true
-
-    async function load() {
-      const { data, error: err } = await supabase
-        .from('v_member_stats')
-        .select('*')
-        .eq('owner_id', userId)
-        .order('name')
-
-      if (!alive) return
-      if (err) {
-        setError(err.message)
-      } else {
-        setError('')
-        setMembers(
-          (data ?? []).map((m) => ({
-            id: m.member_id,
-            name: m.name,
-            skill: m.default_skill,
-            note: m.note,
-            active: m.active,
-            daysPlayed: m.days_played ?? 0,
-            totalGames: m.total_games ?? 0,
-            totalMinutes: m.total_minutes ?? 0,
-            lastPlayedOn: m.last_played_on,
-          })),
-        )
-      }
-      setLoading(false)
-    }
-
-    load()
-    return () => {
-      alive = false
-    }
-  }, [userId, reloadKey])
+  const fetcher = useCallback(
+    () =>
+      userId
+        ? supabase.from('v_member_stats').select('*').eq('owner_id', userId).order('name')
+        : null,
+    [userId],
+  )
+  const { data, loading, error, refetch } = useLoad(fetcher)
 
   const addMember = useCallback(
     async ({ name, skill, note }) => {
@@ -98,10 +76,8 @@ export function useMembers(userId) {
   )
 
   return {
-    members,
-    // ไม่มี id = ไม่ได้กำลังโหลด ไม่ใช่โหลดค้าง — คำนวณตรงนี้แทนการ
-    // setState ในเอฟเฟกต์ ซึ่งทำให้เกิด render ซ้อนโดยไม่จำเป็น
-    loading: userId ? loading : false,
+    members: (data ?? []).map(mapMember),
+    loading,
     error,
     addMember,
     updateMember,

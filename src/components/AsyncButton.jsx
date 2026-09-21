@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
 
 /**
  * ปุ่มที่รู้ตัวเองว่ากำลังรอ server อยู่ — กดแล้วขึ้นสปินเนอร์และกดซ้ำไม่ได้
@@ -18,16 +18,6 @@ export default function AsyncButton({
   ...rest
 }) {
   const [busy, setBusy] = useState(false)
-  // ปุ่มมักหายไปหลังทำงานเสร็จ (เช่น "จบเกม" แล้วคอร์ตกลายเป็นว่าง)
-  // ถ้าไม่กันไว้จะ setState หลัง unmount
-  const mountedRef = useRef(true)
-
-  useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-    }
-  }, [])
 
   const handleClick = useCallback(
     async (e) => {
@@ -36,7 +26,8 @@ export default function AsyncButton({
       try {
         await onClick?.(e)
       } finally {
-        if (mountedRef.current) setBusy(false)
+        // ปุ่มมักหายไปหลังทำงานเสร็จ — React 18+ เมิน setState หลัง unmount เอง
+        setBusy(false)
       }
     },
     [busy, onClick],

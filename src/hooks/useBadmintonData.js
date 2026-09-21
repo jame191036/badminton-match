@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { pairKey, pickNextMatch } from '../utils/pairing'
 
@@ -28,16 +28,6 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
   // ข้อความ error ของคำสั่งล่าสุด (ส่วนใหญ่มาจาก RPC เป็นภาษาไทยอยู่แล้ว)
   const [actionError, setActionError] = useState('')
 
-  // refetchAll ถูกเรียกจาก realtime callback ด้วย ซึ่งอาจมาถึงหลัง unmount
-  // (ตั้ง true ตอน mount ไม่ใช่ตอนประกาศ เพราะ StrictMode จะ mount ซ้ำรอบสอง)
-  const mountedRef = useRef(true)
-  useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-    }
-  }, [])
-
   const refetchAll = useCallback(async () => {
     if (!sessionId) return
 
@@ -62,8 +52,6 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
       supabase.from('v_session_summary').select('*').eq('session_id', sessionId).single(),
       supabase.from('v_pair_history').select('*').eq('session_id', sessionId),
     ])
-
-    if (!mountedRef.current) return
 
     setPairStats(
       new Map(
@@ -346,45 +334,25 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
 
   // pending -> playing (เริ่มจับเวลา)
   const startMatch = useCallback(
-    async (courtId) => {
-      const court = courts.find((c) => c.id === courtId)
-      if (!court?.match) return
-      await run(supabase.rpc('start_match', { p_match_id: court.match.id }))
-    },
-    [courts, run]
+    (matchId) => run(supabase.rpc('start_match', { p_match_id: matchId })),
+    [run],
   )
 
   // เอาคนที่ยังไม่พร้อมออกไปพัก แล้วดึงคนแรกในคิวมาแทน (ทำได้เฉพาะตอน pending)
   const substitutePlayer = useCallback(
-    async (courtId, playerId) => {
-      const court = courts.find((c) => c.id === courtId)
-      if (!court?.match) return
-      await run(
-        supabase.rpc('substitute_player', {
-          p_match_id: court.match.id,
-          p_player_id: playerId,
-        }),
-      )
-    },
-    [courts, run]
+    (matchId, playerId) =>
+      run(supabase.rpc('substitute_player', { p_match_id: matchId, p_player_id: playerId })),
+    [run],
   )
 
   const cancelMatch = useCallback(
-    async (courtId) => {
-      const court = courts.find((c) => c.id === courtId)
-      if (!court?.match) return
-      await run(supabase.rpc('cancel_match', { p_match_id: court.match.id }))
-    },
-    [courts, run]
+    (matchId) => run(supabase.rpc('cancel_match', { p_match_id: matchId })),
+    [run],
   )
 
   const finishMatch = useCallback(
-    async (courtId) => {
-      const court = courts.find((c) => c.id === courtId)
-      if (!court?.match) return
-      await run(supabase.rpc('finish_match', { p_match_id: court.match.id }))
-    },
-    [courts, run]
+    (matchId) => run(supabase.rpc('finish_match', { p_match_id: matchId })),
+    [run],
   )
 
   return {

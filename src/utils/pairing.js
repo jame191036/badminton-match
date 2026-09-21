@@ -40,29 +40,6 @@ function byFairness(p1, p2) {
   return p1.queuedAt - p2.queuedAt
 }
 
-// Given exactly 4 players, find the 2v2 split that minimizes the
-// skill-sum gap between the two teams.
-export function bestTeamSplit(fourPlayers) {
-  const [a, b, c, d] = fourPlayers
-  const combos = [
-    { teamA: [a, b], teamB: [c, d] },
-    { teamA: [a, c], teamB: [b, d] },
-    { teamA: [a, d], teamB: [b, c] },
-  ]
-  let best = combos[0]
-  let bestGap = Infinity
-  for (const combo of combos) {
-    const sumA = combo.teamA.reduce((s, p) => s + p.skill, 0)
-    const sumB = combo.teamB.reduce((s, p) => s + p.skill, 0)
-    const gap = Math.abs(sumA - sumB)
-    if (gap < bestGap) {
-      bestGap = gap
-      best = combo
-    }
-  }
-  return best
-}
-
 function skillGap({ teamA, teamB }) {
   const sumA = teamA.reduce((s, p) => s + p.skill, 0)
   const sumB = teamB.reduce((s, p) => s + p.skill, 0)
@@ -137,9 +114,8 @@ export function pickNextMatch(waitingPlayers, options = {}) {
   const sorted = [...waitingPlayers].sort(byFairness)
 
   if (mode !== 'rotate' || !pairStats || pairStats.size === 0) {
-    const four = sorted.slice(0, 4)
-    const { teamA, teamB } = bestTeamSplit(four)
-    return { teamA, teamB, playerIds: four.map((p) => p.id) }
+    // 2v2 ที่ผลรวมฝีมือสองทีมห่างกันน้อยสุด (เท่ากันเอาแบบแรก)
+    return splitsOf(sorted.slice(0, 4)).reduce((best, s) => (skillGap(s) < skillGap(best) ? s : best))
   }
 
   const window = fairPool(sorted)
@@ -168,9 +144,5 @@ export function pickNextMatch(waitingPlayers, options = {}) {
     }
   }
 
-  return {
-    teamA: best.teamA,
-    teamB: best.teamB,
-    playerIds: [...best.teamA, ...best.teamB].map((p) => p.id),
-  }
+  return best
 }

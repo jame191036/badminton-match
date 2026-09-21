@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { SkeletonList } from './Skeleton'
 import { useConfirm } from '../hooks/useConfirm'
+import { useLoad } from '../hooks/useLoad'
 import AsyncButton from './AsyncButton'
 
 const ROLE_LABEL = {
@@ -17,36 +18,17 @@ const ROLE_LABEL = {
  */
 export default function ClubSharePanel({ clubId, isOwner }) {
   const confirm = useConfirm()
-  const [rows, setRows] = useState([])
-  const [loading, setLoading] = useState(true)
+  const fetcher = useCallback(
+    () => (clubId ? supabase.rpc('list_club_members', { p_club_id: clubId }) : null),
+    [clubId],
+  )
+  const { data, loading, error: loadError, refetch } = useLoad(fetcher)
+  const rows = data ?? []
+  // error ของปุ่มแชร์/ถอนสิทธิ์ แยกจาก error ตอนโหลดรายชื่อ
   const [error, setError] = useState('')
   const [email, setEmail] = useState('')
   const [role, setRole] = useState('viewer')
   const [busy, setBusy] = useState(false)
-  const [reloadKey, setReloadKey] = useState(0)
-
-  const refetch = useCallback(() => setReloadKey((k) => k + 1), [])
-
-  useEffect(() => {
-    if (!clubId) return
-    let alive = true
-
-    async function load() {
-      const { data, error: err } = await supabase.rpc('list_club_members', { p_club_id: clubId })
-      if (!alive) return
-      if (err) setError(err.message)
-      else {
-        setRows(data ?? [])
-        setError('')
-      }
-      setLoading(false)
-    }
-
-    load()
-    return () => {
-      alive = false
-    }
-  }, [clubId, reloadKey])
 
   async function handleShare(e) {
     e.preventDefault()
@@ -104,7 +86,7 @@ export default function ClubSharePanel({ clubId, isOwner }) {
         </>
       )}
 
-      {error && <p className="auth-error" style={{ marginTop: 12 }}>{error}</p>}
+      {(error || loadError) && <p className="auth-error" style={{ marginTop: 12 }}>{error || loadError}</p>}
 
       {loading ? (
         <SkeletonList count={2} lines={1} />
