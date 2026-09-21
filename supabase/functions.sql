@@ -950,6 +950,109 @@ end;
 $$;
 
 -- ------------------------------------------------------------
+-- rating แบบ Elo จากแต้มจริง — เรียกจาก finish_match / set_match_score เท่านั้น
+--
+--   ความแรงทีม = เฉลี่ย rating ของสองคน (แขกใช้ค่าจากระดับมือ)
+--   คาดการณ์   E_A = 1 / (1 + 10^((R_B - R_A) / 400))
+--   ผลจริง     S_A = 0.5 + 0.5 × (a - b) / max(a, b)
+--              ชนะ 21-19 ≈ 0.55 (สูสี), 21-10 ≈ 0.76, 21-0 = 1 (ขาดลอย)
+--   ปรับ      ±K × (S_A - E_A)  K = 48 ช่วง 10 เกมแรก (ยังวัดไม่นิ่ง) แล้ว 32
+--
+-- เวลาเล่นเป็นตัวช่วยยืนยันความสูสีเท่านั้น ไม่ใช่ตัวหลัก เพราะรวมเวลาเก็บลูก
+-- พักคุย และกดจบช้าไว้ด้วย:
+--   สั้นกว่า 3 นาที     -> ไม่คิด rating (น่าจะกดพลาด)
+--   ยาว ≥ 1.25 เท่าของมัธยฐานวันนั้น และแต้มห่าง ≤ 4 -> นับว่าสูสีกว่าที่แต้มบอก
+--   (ลดส่วนต่างจาก 0.5 ลงครึ่งหนึ่ง) ต้องมีเกมอื่นในวันนั้นอย่างน้อย 3 เกม
+--
+-- แขกขาจรไม่มี member จึงไม่ถูกเก็บ rating แต่ยังนับความแรงเข้าทีม
+-- ------------------------------------------------------------
+create or replace function apply_match_rating(p_match_id uuid)
+returns void
+language plpgsql
+as $$
+declare
+  v_m matches%rowtype;
+  v_ra numeric;
+  v_rb numeric;
+  v_expect numeric;
+  v_actual numeric;
+  v_minutes numeric;
+  v_median numeric;
+  v_others int;
+begin
+  select * into v_m from matches where id = p_match_id;
+  if v_m.score_a is null or v_m.started_at is null or v_m.ended_at is null then
+    return;
+  end if;
+
+  v_minutes := extract(epoch from (v_m.ended_at - v_m.started_at)) / 60;
+  if v_minutes < 3 then
+    return;
+  end if;
+
+  select
+    avg(coalesce(mb.rating, skill_rating(mp.skill))) filter (where mp.team = 'A'),
+    avg(coalesce(mb.rating, skill_rating(mp.skill))) filter (where mp.team = 'B')
+  into v_ra, v_rb
+  from match_players mp
+  left join players p  on p.id = mp.player_id
+  left join members mb on mb.id = p.member_id
+  where mp.match_id = p_match_id;
+
+  v_expect := 1 / (1 + power(10, (v_rb - v_ra) / 400));
+  v_actual := 0.5 + 0.5 * (v_m.score_a - v_m.score_b)::numeric / greatest(v_m.score_a, v_m.score_b);
+
+  select count(*), percentile_cont(0.5) within group (order by extract(epoch from (ended_at - started_at)) / 60)
+  into v_others, v_median
+  from matches
+  where session_id = v_m.session_id and id <> p_match_id and status = 'done'
+    and score_a is not null and ended_at - started_at >= interval '3 minutes';
+
+  if v_others >= 3 and v_minutes >= 1.25 * v_median and abs(v_m.score_a - v_m.score_b) <= 4 then
+    v_actual := 0.5 + (v_actual - 0.5) * 0.5;
+  end if;
+
+  update match_players mp
+  set rating_delta = round(
+        (case when mb.rated_games < 10 then 48 else 32 end)
+        * (case when mp.team = 'A' then v_actual - v_expect else v_expect - v_actual end), 2)
+  from players p
+  join members mb on mb.id = p.member_id
+  where mp.match_id = p_match_id and p.id = mp.player_id;
+
+  update members mb
+  set rating = coalesce(mb.rating, skill_rating(mb.default_skill)) + mp.rating_delta,
+      rated_games = mb.rated_games + 1
+  from match_players mp
+  join players p on p.id = mp.player_id
+  where mp.match_id = p_match_id and mp.rating_delta is not null and mb.id = p.member_id;
+end;
+$$;
+
+-- ถอน rating ที่เกมนี้เคยให้ออก ก่อนคิดใหม่ตอนแก้แต้ม
+-- (คิดใหม่จาก rating ปัจจุบัน ไม่ใช่ย้อนทั้งประวัติ — คลาดเคลื่อนเล็กน้อยถ้ามีเกม
+--  อื่นเล่นต่อไปแล้ว แต่แก้แต้มเป็นเรื่องนาน ๆ ครั้ง คุ้มกว่าคำนวณย้อนทั้งหมด)
+create or replace function revert_match_rating(p_match_id uuid)
+returns void
+language plpgsql
+as $$
+begin
+  update members mb
+  set rating = mb.rating - mp.rating_delta,
+      rated_games = greatest(mb.rated_games - 1, 0)
+  from match_players mp
+  join players p on p.id = mp.player_id
+  where mp.match_id = p_match_id and mp.rating_delta is not null and mb.id = p.member_id;
+
+  update match_players set rating_delta = null where match_id = p_match_id;
+end;
+$$;
+
+-- เรียกตรงจาก client ไม่ได้ — ไม่งั้นใครก็ปั่น rating ได้
+revoke execute on function apply_match_rating(uuid) from public, anon, authenticated;
+revoke execute on function revert_match_rating(uuid) from public, anon, authenticated;
+
+-- ------------------------------------------------------------
 -- จบเกม: ปิด match, คืนผู้เล่นเข้าคิว, +1 เกมที่เล่น, ไปต่อท้ายคิว
 -- นับเกมให้เฉพาะคนที่ยังอยู่ใน match_players ตอนจบ
 -- (คนที่ถูกสลับออกไปก่อนเริ่มจึงไม่ถูกนับ — ดู substitute_player)
@@ -995,6 +1098,8 @@ begin
     select player_id from match_players
     where match_id = p_match_id and player_id is not null
   );
+
+  perform apply_match_rating(p_match_id);
 end;
 $$;
 
@@ -1021,7 +1126,9 @@ begin
 
   perform assert_valid_score(p_score_a, p_score_b);
 
+  perform revert_match_rating(p_match_id);
   update matches set score_a = p_score_a, score_b = p_score_b where id = p_match_id;
+  perform apply_match_rating(p_match_id);
 end;
 $$;
 

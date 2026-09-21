@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { QUEUE_MODES, skillLabel } from '../utils/pairing'
+import { QUEUE_MODES, skillLabel, winChance } from '../utils/pairing'
 import AsyncButton from './AsyncButton'
 import { mmss } from '../utils/date'
 import EditableName from './EditableName'
@@ -43,6 +43,19 @@ function TeamSide({ team, label, onSubstitute }) {
         </div>
       ))}
     </div>
+  )
+}
+
+/**
+ * โอกาสชนะของสองฝั่งจาก rating — ให้เห็นว่าคู่นี้สูสีแค่ไหนก่อนตี
+ * ไม่โชว์เลข rating ของใคร โชว์แค่เปอร์เซ็นต์ (ก๊วนที่ปิดการเห็น rating ก็ยังใช้ได้)
+ */
+function OddsBadge({ teamA, teamB }) {
+  const a = Math.round(winChance(teamA, teamB) * 100)
+  return (
+    <span className="odds" title="โอกาสชนะที่ระบบคาดไว้ ฝั่ง A – ฝั่ง B">
+      {a}–{100 - a}
+    </span>
   )
 }
 
@@ -192,7 +205,10 @@ export default function CourtBoard({
                         isPending && !readOnly ? (pid) => onSubstitute(match.id, pid) : null
                       }
                     />
-                    <div className="vs mono">VS</div>
+                    <div className="vs mono">
+                      VS
+                      {playerCount === 4 && <OddsBadge teamA={match.teamA} teamB={match.teamB} />}
+                    </div>
                     <TeamSide
                       team={match.teamB}
                       label="ฝั่ง B"

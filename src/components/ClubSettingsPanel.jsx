@@ -8,7 +8,7 @@ import { useConfirm } from '../hooks/useConfirm'
  * (วันเล่น ประวัติเกม ยอดเงิน — on delete cascade) ถ้าวางเป็นปุ่มเรียงในลิสต์
  * ข้างๆ ปุ่มลบอย่างอื่นที่ไม่ร้ายแรงเท่ากัน จะกดพลาดง่ายเกินไป
  */
-export default function ClubSettingsPanel({ club, stats, onRename, onDelete }) {
+export default function ClubSettingsPanel({ club, stats, onRename, onToggleRating, onDelete }) {
   const confirm = useConfirm()
   const [name, setName] = useState(club.name)
   const [note, setNote] = useState(club.note ?? '')
@@ -84,6 +84,26 @@ export default function ClubSettingsPanel({ club, stats, onRename, onDelete }) {
       </form>
 
       {error && <p className="auth-error">{error}</p>}
+
+      <label className="guest-toggle rating-toggle">
+        <input
+          type="checkbox"
+          checked={club.showRating}
+          disabled={busy}
+          onChange={async (e) => {
+            setError('')
+            try {
+              await onToggleRating(e.target.checked)
+            } catch (err) {
+              setError(err.message)
+            }
+          }}
+        />
+        <span>
+          ให้ทุกคนในก๊วนเห็นตัวเลข rating ในแท็บอันดับ
+          <span className="panel-hint"> (ปิดแล้วยังเรียงอันดับเหมือนเดิม และคนจัดก๊วนยังเห็นเลขอยู่)</span>
+        </span>
+      </label>
 
       <div className="danger-zone">
         <h3 className="section-head">ลบก๊วนนี้</h3>

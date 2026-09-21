@@ -154,6 +154,16 @@ export function useClubDays(clubId) {
 
   // ลบก๊วน = cascade ลบวันเล่น ผู้เล่น เกม และยอดเงินทั้งหมดของก๊วนนั้น
   // RLS ยอมเฉพาะเจ้าของ (policy "owner deletes club")
+  // เปิด/ปิดให้สมาชิกเห็นตัวเลข rating (RLS ยอมเฉพาะเจ้าของ)
+  const setShowRating = useCallback(
+    async (show) => {
+      const { error: err } = await supabase.from('clubs').update({ show_rating: show }).eq('id', clubId)
+      if (err) throw new Error(err.message)
+      refetch()
+    },
+    [clubId, refetch],
+  )
+
   const deleteClub = useCallback(async () => {
     const { error: err } = await supabase.from('clubs').delete().eq('id', clubId)
     if (err) throw new Error(err.message)
@@ -171,6 +181,7 @@ export function useClubDays(clubId) {
     startDay,
     cancelDay,
     renameClub,
+    setShowRating,
     deleteClub,
   }
 }

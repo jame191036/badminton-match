@@ -85,6 +85,8 @@ create table clubs (
   name       text not null check (char_length(trim(name)) > 0),
   note       text,
   active     boolean not null default true,
+  -- ให้ทุกคนในก๊วนเห็นตัวเลข rating ไหม (คนจัดก๊วนเห็นเสมอ)
+  show_rating boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -127,11 +129,23 @@ create table members (
   default_skill smallint not null default 2 check (default_skill between 1 and 3),
   note          text,
   active        boolean not null default true,
+  -- ความเก่งที่เรียนรู้จากแต้มจริง (แบบ Elo) — null = ยังไม่มีเกมที่จดแต้ม
+  -- ให้ใช้ค่าจากระดับมือแทน (skill_rating) ปรับระดับมือแล้วค่าตามไปด้วยจนกว่าจะเริ่มเล่นจริง
+  rating        numeric(7, 2),
+  rated_games   int not null default 0,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
 
 create index idx_members_owner on members(owner_id);
+
+-- ระดับมือ 1–3 -> rating ตั้งต้น (100 แต้ม ≈ ห่างกันหนึ่งระดับมือ)
+-- ต้องตรงกับ skillRating() ใน src/utils/pairing.js
+create or replace function skill_rating(p_skill int)
+returns numeric
+language sql
+immutable
+as $$ select 800 + 100 * p_skill::numeric $$;
 
 create unique index uq_members_owner_name
   on members(owner_id, lower(trim(name)));
@@ -390,6 +404,9 @@ create table match_players (
   player_name text not null,
   skill       smallint not null check (skill between 1 and 3),
   team        text not null check (team in ('A', 'B')),
+  -- rating ที่เกมนี้ให้/หักคนนี้ (null = ไม่ได้คิด: ไม่จดแต้ม แขก หรือเกมสั้นผิดปกติ)
+  -- เก็บไว้เพื่อถอนออกตอนแก้แต้มย้อนหลัง
+  rating_delta numeric(6, 2),
   created_at  timestamptz not null default now()
 );
 
@@ -597,7 +614,13 @@ select
   count(m.id) filter (where m.score_a is not null and (mp.team = 'A') =  (m.score_a > m.score_b)) as wins,
   count(m.id) filter (where m.score_a is not null and (mp.team = 'A') <> (m.score_a > m.score_b)) as losses,
   coalesce(sum(case when mp.team = 'A' then m.score_a - m.score_b else m.score_b - m.score_a end)
-           filter (where m.score_a is not null), 0) as point_diff
+           filter (where m.score_a is not null), 0) as point_diff,
+  -- พักครบหนึ่งเกมแล้วหรือยัง: หลังจบเกมล่าสุดของเรา ต้องมีเกมอื่นที่จับคู่
+  -- หลังจากนั้นและเล่นจบไปแล้วหนึ่งเกม (ยังไม่เคยเล่น = พักครบ)
+  max(m.ended_at) is null or exists (
+    select 1 from matches m2
+    where m2.session_id = p.session_id and m2.status = 'done' and m2.created_at > max(m.ended_at)
+  ) as rested
 from players p
 left join match_players mp on mp.player_id = p.id
 left join matches m
@@ -695,6 +718,8 @@ select
   s.club_id,
   mb.id   as member_id,
   mb.name,
+  coalesce(mb.rating, skill_rating(mb.default_skill)) as rating,
+  mb.rated_games,
   count(*)                                                        as games,
   count(*) filter (where (mp.team = 'A') =  (m.score_a > m.score_b)) as wins,
   count(*) filter (where (mp.team = 'A') <> (m.score_a > m.score_b)) as losses,
@@ -704,7 +729,7 @@ join matches m  on m.id = mp.match_id and m.status = 'done' and m.score_a is not
 join sessions s on s.id = m.session_id
 join players p  on p.id = mp.player_id
 join members mb on mb.id = p.member_id
-group by s.club_id, mb.id, mb.name;
+group by s.club_id, mb.id, mb.name, mb.rating, mb.default_skill, mb.rated_games;
 
 -- ก๊วนที่ฉันเข้าถึงได้ พร้อมบทบาทและวันเล่นล่าสุด/ถัดไป
 create or replace view v_my_clubs as
@@ -724,7 +749,8 @@ select
   (select s.id from sessions s where s.club_id = c.id and s.status = 'playing' limit 1) as playing_session_id,
   (select max(s.play_date) from sessions s where s.club_id = c.id and s.status = 'done') as last_played_on,
   (select min(s.play_date) from sessions s
-    where s.club_id = c.id and s.status = 'planned' and s.play_date >= current_date) as next_play_date
+    where s.club_id = c.id and s.status = 'planned' and s.play_date >= current_date) as next_play_date,
+  c.show_rating
 from clubs c
 join club_access a on a.club_id = c.id and a.user_id = auth.uid();
 

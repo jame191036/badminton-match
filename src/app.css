@@ -437,7 +437,9 @@
   gap: 8px;
 }
 .team-skill { font-size: 0.72rem; color: var(--text-faint); }
-.vs { color: var(--coral); font-weight: 700; font-size: 0.85rem; }
+.vs { color: var(--coral); font-weight: 700; font-size: 0.85rem; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+/* โอกาสชนะใต้ VS — ตัวเล็กสีจาง เป็นข้อมูลประกอบ ไม่ใช่จุดเด่น */
+.odds { font-size: 0.68rem; font-weight: 500; color: var(--text-faint); white-space: nowrap; }
 
 .btn-finish { width: 100%; }
 

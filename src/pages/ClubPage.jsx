@@ -36,6 +36,7 @@ export default function ClubPage() {
     startDay,
     cancelDay,
     renameClub,
+    setShowRating,
     deleteClub,
   } = useClubDays(clubId)
   // อ่านนาฬิกาครั้งเดียวตอน mount — ไม่อ่านระหว่าง render
@@ -139,7 +140,7 @@ export default function ClubPage() {
         {actionError && <p className="auth-error">{actionError}</p>}
 
         {tab === 'ranking' ? (
-          <ClubRanking clubId={clubId} />
+          <ClubRanking clubId={clubId} showRating={club.showRating || canEdit} />
         ) : tab === 'share' ? (
           <ClubSharePanel clubId={clubId} isOwner={club.role === 'owner'} />
         ) : tab === 'settings' ? (
@@ -148,6 +149,7 @@ export default function ClubPage() {
             // total_days นับทุกสถานะ รวม playing กับ cancelled ที่ cascade ก็ลบไปด้วย
             stats={{ dayCount: club.totalDays }}
             onRename={renameClub}
+            onToggleRating={setShowRating}
             onDelete={async () => {
               await deleteClub()
               navigate('/')

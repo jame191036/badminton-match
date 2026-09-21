@@ -14,6 +14,8 @@ function mapPlayer(row) {
     gamesPlayed: row.games_played,
     paying: row.paying,
     queuedAt: row.queue_seq,
+    // rating ของสมาชิก (ข้ามวัน) — null สำหรับแขก / ยังไม่เคยจดแต้ม ให้ pairing ใช้ระดับมือแทน
+    rating: row.members?.rating == null ? null : Number(row.members.rating),
   }
 }
 
@@ -40,7 +42,7 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
       summaryRes,
       pairsRes,
     ] = await Promise.all([
-      supabase.from('players').select('*').eq('session_id', sessionId).order('queue_seq'),
+      supabase.from('players').select('*, members(rating)').eq('session_id', sessionId).order('queue_seq'),
       supabase.from('courts').select('*').eq('session_id', sessionId).order('sort_order'),
       supabase
         .from('matches')
@@ -48,7 +50,7 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
         .eq('session_id', sessionId)
         .is('ended_at', null),
       supabase.from('v_match_history').select('*').eq('session_id', sessionId).limit(30),
-      supabase.from('v_session_player_stats').select('player_id, games, minutes, wins, losses, point_diff').eq('session_id', sessionId),
+      supabase.from('v_session_player_stats').select('player_id, games, minutes, wins, losses, point_diff, rested').eq('session_id', sessionId),
       supabase.from('v_session_summary').select('*').eq('session_id', sessionId).single(),
       supabase.from('v_pair_history').select('*').eq('session_id', sessionId),
     ])
@@ -76,6 +78,8 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
           wins: statsById.get(row.id)?.wins ?? 0,
           losses: statsById.get(row.id)?.losses ?? 0,
           pointDiff: statsById.get(row.id)?.point_diff ?? 0,
+          // พักครบหนึ่งเกมหรือยัง — pairing ใช้บังคับพักหลังเล่นจบ
+          rested: statsById.get(row.id)?.rested ?? true,
         }))
       )
     }
@@ -92,6 +96,16 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
 
     if (courtsRes.data) {
       const matchByCourtId = new Map((activeMatchesRes.data ?? []).map((m) => [m.court_id, m]))
+      // rating ของคนในคอร์ต ไว้โชว์โอกาสชนะ — match_players เก็บแค่ชื่อ/ระดับมือ
+      const ratingById = new Map(
+        (playersRes.data ?? []).map((p) => [p.id, p.members?.rating == null ? null : Number(p.members.rating)]),
+      )
+      const toCourtPlayer = (mp) => ({
+        id: mp.player_id,
+        name: mp.player_name,
+        skill: mp.skill,
+        rating: ratingById.get(mp.player_id) ?? null,
+      })
       setCourts(
         courtsRes.data.map((c) => {
           const m = matchByCourtId.get(c.id)
@@ -99,10 +113,10 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
           if (!m) return { ...base, match: null }
           const teamA = m.match_players
             .filter((mp) => mp.team === 'A')
-            .map((mp) => ({ id: mp.player_id, name: mp.player_name, skill: mp.skill }))
+            .map(toCourtPlayer)
           const teamB = m.match_players
             .filter((mp) => mp.team === 'B')
-            .map((mp) => ({ id: mp.player_id, name: mp.player_name, skill: mp.skill }))
+            .map(toCourtPlayer)
           return {
             ...base,
             match: {

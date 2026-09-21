@@ -25,6 +25,7 @@ export function mapClub(row) {
     playingSessionId: row.playing_session_id,
     lastPlayedOn: row.last_played_on,
     nextPlayDate: row.next_play_date,
+    showRating: row.show_rating ?? true,
   }
 }
 

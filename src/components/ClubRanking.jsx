@@ -3,10 +3,13 @@ import { MIN_RANKED_GAMES, scoredGames, winRate } from '../utils/ranking'
 import { SkeletonList } from './Skeleton'
 
 /**
- * อันดับรวมของก๊วน — ตารางเพราะคนมาดูเพื่อเทียบกัน (แบบเดียวกับประวัติวันเล่น)
+ * อันดับรวมของก๊วน เรียงตาม rating — ตารางเพราะคนมาดูเพื่อเทียบกัน
  * คนที่เล่นไม่ถึงเกณฑ์ยังไม่มีอันดับ แสดงต่อท้ายแบบจาง ๆ
+ *
+ * showRating = false: ซ่อนตัวเลข rating แต่ยังเรียงตามมัน (เจ้าของก๊วนเลือกได้
+ * ในแท็บตั้งค่า เผื่อบางก๊วนไม่อยากให้ใครเห็นว่าตัวเองได้คะแนนต่ำ)
  */
-export default function ClubRanking({ clubId }) {
+export default function ClubRanking({ clubId, showRating = true }) {
   const { rows, loading, error } = useClubRanking(clubId)
 
   if (loading) return <SkeletonList count={5} lines={1} />
@@ -23,7 +26,8 @@ export default function ClubRanking({ clubId }) {
   return (
     <>
       <p className="panel-hint">
-        นับเฉพาะเกมที่จดแต้ม และเฉพาะคนในรายชื่อ (แขกขาจรไม่ติดอันดับ) ·
+        เรียงตามความเก่งที่ระบบเรียนรู้จากแต้มจริง ชนะขาดได้มาก ชนะสูสีได้น้อย
+        และแพ้ทีมที่เก่งกว่าแบบสูสีก็ยังได้ · นับเฉพาะเกมที่จดแต้ม เฉพาะคนในรายชื่อ ·
         เล่นครบ {MIN_RANKED_GAMES} เกมก่อนถึงจะมีอันดับ
       </p>
       <div className="table-wrap">
@@ -32,6 +36,7 @@ export default function ClubRanking({ clubId }) {
             <tr>
               <th className="is-num">#</th>
               <th>ชื่อ</th>
+              {showRating && <th className="is-num">rating</th>}
               <th className="is-num">เกม</th>
               <th className="is-num">ชนะ</th>
               <th className="is-num">แพ้</th>
@@ -47,6 +52,7 @@ export default function ClubRanking({ clubId }) {
                 <tr key={r.id} className={ranked ? '' : 'is-cancelled'}>
                   <td className="is-num mono">{ranked ? rank : '—'}</td>
                   <td>{r.name}</td>
+                  {showRating && <td className="is-num mono">{Math.round(r.rating)}</td>}
                   <td className="is-num mono">{scoredGames(r)}</td>
                   <td className="is-num mono">{r.wins}</td>
                   <td className="is-num mono">{r.losses}</td>
