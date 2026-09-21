@@ -191,7 +191,7 @@ export default function ClubPage() {
                           day={day}
                           clubId={clubId}
                           canEdit={canEdit}
-                          canStart
+                          canStart={day.playDate <= today}
                           overdue
                           onStart={() => run(() => startDay(day.id))}
                           onCancel={() => run(() => cancelDay(day.id))}
@@ -309,7 +309,7 @@ function PastDaysTable({ clubId }) {
 }
 
 // canStart = ถึงวันแล้ว — วันในอนาคตไม่มีปุ่ม "เริ่มวันนี้" (ยังเข้าไปเริ่มจากหน้าวันเล่นได้)
-function DayRow({ day, clubId, canEdit, canStart = false, overdue = false, onStart, onCancel }) {
+function DayRow({ day, clubId, canEdit, canStart, overdue = false, onStart, onCancel }) {
   const confirm = useConfirm()
   const time = formatTimeRange(day.startTime, day.endTime)
 

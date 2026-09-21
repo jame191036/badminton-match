@@ -93,3 +93,19 @@ export function hoursBetween(start, end) {
   const diff = (((eh * 60 + em - (sh * 60 + sm)) % 1440) + 1440) % 1440
   return diff / 60
 }
+
+/** วินาที -> 'mm:ss' ใช้ทั้งนาฬิกาบนคอร์ตและเวลาต่อเกมในประวัติ (null = ไม่แสดง) */
+export function mmss(seconds) {
+  if (seconds == null) return null
+  const total = Math.max(0, Math.floor(seconds))
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+}
+
+/** นาที -> '45 นาที' / '2 ชม.' / '2 ชม. 30 นาที' (0 หรือว่าง = '—') */
+export function formatMinutes(min) {
+  if (!min) return '—'
+  const h = Math.floor(min / 60)
+  const m = min % 60
+  if (h === 0) return `${m} นาที`
+  return m === 0 ? `${h} ชม.` : `${h} ชม. ${m} นาที`
+}

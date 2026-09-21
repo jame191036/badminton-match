@@ -6,7 +6,6 @@ import { useLoad } from './useLoad'
 export function mapDay(row) {
   return {
     id: row.session_id,
-    clubId: row.club_id,
     playDate: row.play_date,
     startTime: row.start_time,
     endTime: row.end_time,
@@ -15,7 +14,6 @@ export function mapDay(row) {
     shuttleBrandName: row.shuttle_brand_name,
     totalFee: Number(row.total_fee ?? 0),
     perPerson: Number(row.per_person ?? 0),
-    totalHours: Number(row.total_hours ?? 0),
     playerCount: Number(row.player_count ?? 0),
     gameCount: Number(row.game_count ?? 0),
   }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { QUEUE_MODES, skillLabel } from '../utils/pairing'
 import AsyncButton from './AsyncButton'
+import { mmss } from '../utils/date'
 import EditableName from './EditableName'
 
 // นาฬิกาเดินตัวเดียวใช้ร่วมกันทุกคอร์ต ดีกว่าให้แต่ละคอร์ตตั้ง interval เอง
@@ -14,13 +15,6 @@ function useNow(active) {
   }, [active])
 
   return now
-}
-
-function formatElapsed(ms) {
-  const total = Math.max(0, Math.floor(ms / 1000))
-  const mm = String(Math.floor(total / 60)).padStart(2, '0')
-  const ss = String(total % 60).padStart(2, '0')
-  return `${mm}:${ss}`
 }
 
 function TeamSide({ team, label, onSubstitute }) {
@@ -56,7 +50,7 @@ export default function CourtBoard({
   courts,
   readOnly = false,
   // วันเล่นเริ่มแล้วหรือยัง — ก่อนเริ่ม DB ไม่ยอมให้จับคู่ ปุ่มจึงต้องกดไม่ได้ตั้งแต่แรก
-  live = true,
+  live,
   waitingCount,
   onAssign,
   onStart,
@@ -136,7 +130,7 @@ export default function CourtBoard({
                   <span className={`court-status mono ${isPending ? 'is-pending' : 'is-playing'}`}>
                     {isPending
                       ? 'รอเริ่มเกม'
-                      : formatElapsed(now - (match.startedAt ?? now))}
+                      : mmss((now - (match.startedAt ?? now)) / 1000)}
                   </span>
                 )}
               </div>

@@ -1,29 +1,14 @@
-import { useCallback, useState } from 'react'
-import { supabase } from '../lib/supabaseClient'
+import { useState } from 'react'
 import { SkeletonList } from './Skeleton'
 import { useConfirm } from '../hooks/useConfirm'
-import { useLoad } from '../hooks/useLoad'
+import { useClubMembers } from '../hooks/useClubMembers'
+import { ROLE_LABEL } from '../hooks/useClubs'
 import AsyncButton from './AsyncButton'
 
-const ROLE_LABEL = {
-  owner: 'เจ้าของ',
-  editor: 'จัดก๊วนได้',
-  viewer: 'ดูอย่างเดียว',
-}
-
-/**
- * รายชื่อคนที่เข้าถึงก๊วนนี้ได้
- * ต้องอ่านผ่าน RPC ไม่ใช่ view เพราะอีเมลอยู่ใน auth.users
- * ซึ่ง role authenticated อ่านตรงๆ ไม่ได้
- */
+/** รายชื่อคนที่เข้าถึงก๊วนนี้ได้ และฟอร์มแชร์ (เฉพาะเจ้าของ) */
 export default function ClubSharePanel({ clubId, isOwner }) {
   const confirm = useConfirm()
-  const fetcher = useCallback(
-    () => (clubId ? supabase.rpc('list_club_members', { p_club_id: clubId }) : null),
-    [clubId],
-  )
-  const { data, loading, error: loadError, refetch } = useLoad(fetcher)
-  const rows = data ?? []
+  const { members: rows, loading, error: loadError, share, revoke } = useClubMembers(clubId)
   // error ของปุ่มแชร์/ถอนสิทธิ์ แยกจาก error ตอนโหลดรายชื่อ
   const [error, setError] = useState('')
   const [email, setEmail] = useState('')
@@ -35,14 +20,8 @@ export default function ClubSharePanel({ clubId, isOwner }) {
     setError('')
     setBusy(true)
     try {
-      const { error: err } = await supabase.rpc('grant_club_access', {
-        p_club_id: clubId,
-        p_email: email,
-        p_role: role,
-      })
-      if (err) throw new Error(err.message)
+      await share(email, role)
       setEmail('')
-      refetch()
     } catch (err) {
       setError(err.message)
     } finally {
@@ -52,12 +31,11 @@ export default function ClubSharePanel({ clubId, isOwner }) {
 
   async function handleRevoke(userId) {
     setError('')
-    const { error: err } = await supabase.rpc('revoke_club_access', {
-      p_club_id: clubId,
-      p_user_id: userId,
-    })
-    if (err) setError(err.message)
-    else refetch()
+    try {
+      await revoke(userId)
+    } catch (err) {
+      setError(err.message)
+    }
   }
 
   return (

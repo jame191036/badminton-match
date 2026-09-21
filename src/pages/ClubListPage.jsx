@@ -1,14 +1,8 @@
 import { useState } from 'react'
 import { Link, useNavigate, useOutletContext } from 'react-router-dom'
-import { useClubs } from '../hooks/useClubs'
+import { ROLE_LABEL, useClubs } from '../hooks/useClubs'
 import { SkeletonList } from '../components/Skeleton'
 import { thaiDate } from '../utils/date'
-
-const ROLE_LABEL = {
-  owner: 'เจ้าของ',
-  editor: 'จัดก๊วนได้',
-  viewer: 'ดูอย่างเดียว',
-}
 
 const formatThaiDate = (v) => thaiDate(v, { day: 'numeric', month: 'short', year: '2-digit' })
 

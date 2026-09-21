@@ -181,6 +181,8 @@ export default function NewPlayDayForm({
   })
 
   const duration = hoursBetween(startTime, endTime)
+  // hoursBetween วนรอบ 24 ชม. — เวลาจบก่อนเริ่ม (พิมพ์ผิด) ได้ ~22 ชม. ไม่ใช่ชั่วโมงที่จองจริง
+  const bookable = (h) => h > 0 && h <= 12
 
   /**
    * ตั้งเวลาเริ่ม/จบ แล้วให้ชั่วโมงของคอร์ตตามความยาวที่นัดไว้
@@ -194,7 +196,7 @@ export default function NewPlayDayForm({
     const next = hoursBetween(start, end)
     setStartTime(start)
     setEndTime(end)
-    if (!(next > 0 && next <= 12)) return
+    if (!bookable(next)) return
     setCourts((cs) =>
       cs.map((c) =>
         c.hours === '' || Number(c.hours) === prev ? { ...c, hours: String(next) } : c,
@@ -358,7 +360,7 @@ export default function NewPlayDayForm({
             onClick={() =>
               setCourts((prev) => [
                 ...prev,
-                { name: '', hours: duration > 0 && duration <= 12 ? String(duration) : '' },
+                { name: '', hours: bookable(duration) ? String(duration) : '' },
               ])
             }
           >

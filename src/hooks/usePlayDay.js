@@ -4,7 +4,6 @@ import { supabase } from '../lib/supabaseClient'
 function mapDay(row) {
   return {
     id: row.id,
-    clubId: row.club_id,
     playDate: row.play_date,
     startTime: row.start_time,
     endTime: row.end_time,
@@ -16,15 +15,12 @@ function mapDay(row) {
     shuttleBrandId: row.shuttle_brand_id,
     shuttleModelId: row.shuttle_model_id,
     queueMode: row.queue_mode ?? 'sequential',
-    closedAt: row.closed_at,
     finals: {
       totalFee: Number(row.final_total_fee ?? 0),
       perPerson: Number(row.final_per_person ?? 0),
       payerCount: row.final_payer_count ?? 0,
       playerCount: row.final_player_count ?? 0,
       gameCount: row.final_game_count ?? 0,
-      playMinutes: row.final_play_minutes ?? 0,
-      totalHours: Number(row.final_total_hours ?? 0),
     },
   }
 }

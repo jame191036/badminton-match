@@ -8,11 +8,8 @@ function mapMember(m) {
     name: m.name,
     skill: m.default_skill,
     note: m.note,
-    active: m.active,
     daysPlayed: m.days_played ?? 0,
     totalGames: m.total_games ?? 0,
-    totalMinutes: m.total_minutes ?? 0,
-    lastPlayedOn: m.last_played_on,
   }
 }
 

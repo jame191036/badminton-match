@@ -2,13 +2,18 @@ import { useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useLoad } from './useLoad'
 
+export const ROLE_LABEL = {
+  owner: 'เจ้าของ',
+  editor: 'จัดก๊วนได้',
+  viewer: 'ดูอย่างเดียว',
+}
+
 export function mapClub(row) {
   return {
     id: row.id,
     ownerId: row.owner_id,
     name: row.name,
     note: row.note,
-    active: row.active,
     role: row.role,
     isMine: row.is_mine,
     // นับจาก view ไม่ได้นับจากแถวที่โหลดมา เพราะประวัติไม่ได้โหลดครบ

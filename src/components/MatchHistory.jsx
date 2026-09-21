@@ -1,12 +1,7 @@
-// นาที:วินาที แบบเดียวกับนาฬิกาที่เดินอยู่บนคอร์ต (ดู CourtBoard)
+import { mmss } from '../utils/date'
+
+// นาที:วินาที แบบเดียวกับนาฬิกาที่เดินอยู่บนคอร์ต
 // เกมแบดส่วนใหญ่ 10-25 นาที การบอกเป็นวินาทีด้วยจึงยังอ่านง่าย
-function formatDuration(seconds) {
-  if (seconds == null) return null
-  const total = Math.round(seconds)
-  const mm = Math.floor(total / 60)
-  const ss = String(total % 60).padStart(2, '0')
-  return `${mm}:${ss}`
-}
 
 /**
  * history คือ 30 เกมล่าสุดเท่านั้น (ดู useBadmintonData) ยอดรวมจึงเอามาจาก
@@ -27,7 +22,7 @@ export default function MatchHistory({ history, summary }) {
         <p className="history-summary mono">
           {/* ไม่ต่อคำว่า "นาที" ท้าย mm:ss เพราะ "14:32 นาที" อ่านแล้วเข้าใจว่า
               14 นาที 32 อะไรไม่รู้ — เวลารวมเป็นนาทีเต็มจึงต่อหน่วยได้ */}
-          {games} เกม · เฉลี่ยเกมละ {formatDuration(avgSeconds)} (นาที:วินาที) · รวม{' '}
+          {games} เกม · เฉลี่ยเกมละ {mmss(avgSeconds)} (นาที:วินาที) · รวม{' '}
           {totalMinutes} นาที
         </p>
       )}
@@ -55,7 +50,7 @@ export default function MatchHistory({ history, summary }) {
             </span>
             {h.durationSeconds != null && (
               <span className="history-duration mono" title="เวลาที่ใช้เล่นเกมนี้">
-                {formatDuration(h.durationSeconds)}
+                {mmss(h.durationSeconds)}
               </span>
             )}
           </li>

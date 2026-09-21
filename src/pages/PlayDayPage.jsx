@@ -13,7 +13,7 @@ import BillingPanel from '../components/BillingPanel'
 import { SkeletonCourts, SkeletonHead, SkeletonQueue } from '../components/Skeleton'
 import { useConfirm } from '../hooks/useConfirm'
 import AsyncButton from '../components/AsyncButton'
-import { clock, hoursBetween, thaiDate } from '../utils/date'
+import { clock, formatMinutes, hoursBetween, thaiDate } from '../utils/date'
 
 // count คืน null = ไม่ต้องโชว์ตัวเลขบนแท็บ
 // แท็บผู้เล่นโชว์ "จำนวนคนที่รอคิว" ไม่ใช่จำนวนคนทั้งหมด เพราะตอนอยู่แท็บคอร์ต
@@ -37,12 +37,7 @@ const formatThaiDate = (v) =>
   thaiDate(v, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 
 /** 3 → "3 ชม." / 2.5 → "2 ชม. 30 นาที" */
-function formatHoursLabel(hours) {
-  const whole = Math.floor(hours)
-  const minutes = Math.round((hours - whole) * 60)
-  if (whole === 0) return `${minutes} นาที`
-  return minutes === 0 ? `${whole} ชม.` : `${whole} ชม. ${minutes} นาที`
-}
+const formatHoursLabel = (hours) => formatMinutes(Math.round(hours * 60))
 
 export default function PlayDayPage() {
   const { clubId, sessionId } = useParams()

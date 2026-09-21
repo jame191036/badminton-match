@@ -1,12 +1,5 @@
 import { skillLabel } from '../utils/pairing'
-
-function formatMinutes(min) {
-  if (!min) return '—'
-  if (min < 60) return `${min} นาที`
-  const h = Math.floor(min / 60)
-  const m = min % 60
-  return m === 0 ? `${h} ชม.` : `${h} ชม. ${m} นาที`
-}
+import { formatMinutes } from '../utils/date'
 
 const STATUS_LABEL = {
   waiting: 'รอคิว',

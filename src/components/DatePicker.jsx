@@ -13,7 +13,7 @@ const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส']
  *
  * รับ/คืนค่าเป็นสตริง YYYY-MM-DD เหมือนเดิม ฝั่ง DB จึงไม่ต้องเปลี่ยนอะไร
  */
-export default function DatePicker({ value, onChange, id }) {
+export default function DatePicker({ value, onChange }) {
   const [open, setOpen] = useState(false)
   const [today] = useState(todayISO)
   const [viewMonth, setViewMonth] = useState(() => (value || today).slice(0, 7))
@@ -53,7 +53,6 @@ export default function DatePicker({ value, onChange, id }) {
     <div className="date-picker" ref={boxRef}>
       <button
         type="button"
-        id={id}
         className="date-picker-trigger"
         aria-haspopup="dialog"
         aria-expanded={open}
