@@ -26,6 +26,8 @@ export function mapClub(row) {
     lastPlayedOn: row.last_played_on,
     nextPlayDate: row.next_play_date,
     showRating: row.show_rating ?? true,
+    promptpayId: row.promptpay_id,
+    promptpayName: row.promptpay_name,
   }
 }
 

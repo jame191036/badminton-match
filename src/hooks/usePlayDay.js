@@ -33,6 +33,8 @@ export function usePlayDay(sessionId) {
   const [day, setDay] = useState(null)
   const [role, setRole] = useState(null)
   const [ownerId, setOwnerId] = useState(null)
+  // ชื่อก๊วนและพร้อมเพย์ — ใช้ในข้อความสรุปยอดและ QR ของแท็บเก็บเงิน
+  const [clubInfo, setClubInfo] = useState(null)
   const [billing, setBilling] = useState({ hourlyRate: '', shuttlePrice: '', shuttleCount: '' })
   // คอร์ตที่จองของวันนี้ — หน้าแก้ไขต้องใช้ ส่วนกระดานใช้ชุดของ useBadmintonData
   const [courts, setCourts] = useState([])
@@ -82,7 +84,7 @@ export function usePlayDay(sessionId) {
         // viewer เห็นปุ่มแล้วกดไม่ได้ จะดูเหมือนแอปพัง ทั้งที่ RLS ทำงานถูก
         const { data: clubRow } = await supabase
           .from('v_my_clubs')
-          .select('role, owner_id')
+          .select('role, owner_id, name, promptpay_id, promptpay_name')
           .eq('id', data.club_id)
           .maybeSingle()
 
@@ -90,6 +92,11 @@ export function usePlayDay(sessionId) {
         setRole(clubRow?.role ?? null)
         // ข้อมูลหลักผูกกับบัญชีเจ้าของก๊วน ไม่ใช่คนที่ล็อกอินอยู่
         setOwnerId(clubRow?.owner_id ?? null)
+        setClubInfo(
+          clubRow
+            ? { name: clubRow.name, promptpayId: clubRow.promptpay_id, promptpayName: clubRow.promptpay_name }
+            : null,
+        )
       }
       setLoading(false)
     }
@@ -229,6 +236,7 @@ export function usePlayDay(sessionId) {
     courts,
     role,
     ownerId,
+    clubInfo,
     // viewer ดูได้อย่างเดียว — ตรงกับ can_edit_session ฝั่ง DB
     canEdit: role === 'owner' || role === 'editor',
     billing,

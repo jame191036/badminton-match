@@ -10,6 +10,9 @@ import CourtBoard from '../components/CourtBoard'
 import MatchHistory from '../components/MatchHistory'
 import SessionStats from '../components/SessionStats'
 import BillingPanel from '../components/BillingPanel'
+import PaymentPanel from '../components/PaymentPanel'
+import { useClubOutstanding } from '../hooks/useClubOutstanding'
+import { computeBilling, isPayer } from '../utils/billing'
 import { SkeletonCourts, SkeletonHead, SkeletonQueue } from '../components/Skeleton'
 import { useConfirm } from '../hooks/useConfirm'
 import AsyncButton from '../components/AsyncButton'
@@ -22,6 +25,8 @@ const DAY_TABS = [
   { id: 'board', label: 'คอร์ต', count: (c) => (c.playing > 0 ? c.playing : null) },
   { id: 'players', label: 'ผู้เล่น', count: (c) => (c.waiting > 0 ? c.waiting : null) },
   { id: 'billing', label: 'หารเงิน', count: () => null },
+  // จำนวนคนที่ยังไม่จ่าย — เห็นจากทุกแท็บว่ายังเก็บเงินไม่ครบ
+  { id: 'collect', label: 'เก็บเงิน', count: (c) => (c.unpaid > 0 ? c.unpaid : null) },
   { id: 'stats', label: 'สถิติ', count: () => null },
   { id: 'history', label: 'ประวัติ', count: (c) => (c.games > 0 ? c.games : null) },
 ]
@@ -46,6 +51,7 @@ export default function PlayDayPage() {
     day,
     canEdit,
     ownerId,
+    clubInfo,
     billing,
     loading: dayLoading,
     error: dayError,
@@ -59,6 +65,7 @@ export default function PlayDayPage() {
   } = usePlayDay(sessionId)
 
   const isLive = day?.status === 'playing'
+  const outstanding = useClubOutstanding(clubId)
   const {
     players,
     courts,
@@ -101,9 +108,27 @@ export default function PlayDayPage() {
    *   หารเงิน — BillingPanel คำนวณสดจากราคาปัจจุบัน ซึ่งอาจไม่ตรงกับยอดที่
    *             freeze ไว้ ยอดจริงแสดงอยู่ในกล่อง "ยอดที่ล็อกไว้" ด้านบนแล้ว
    */
+  // วันที่จองไว้ยังไม่มีอะไรให้เก็บเงิน — แท็บเก็บเงินโผล่ตั้งแต่เริ่มเล่น และยังอยู่หลังจบวัน
+  // เพราะส่วนใหญ่โอนกันหลังเลิกเล่น
   const tabs = isClosed
     ? DAY_TABS.filter((t) => t.id !== 'board' && t.id !== 'billing')
-    : DAY_TABS
+    : day?.status === 'planned'
+      ? DAY_TABS.filter((t) => t.id !== 'collect')
+      : DAY_TABS
+
+  // เก็บเงิน: วันที่จบแล้วใช้ยอดที่ freeze ไว้ ไม่งั้นใช้ยอดสดสูตรเดียวกับแท็บหารเงิน
+  const payers = players.filter(isPayer)
+  const live = computeBilling({ players, courts, billing })
+  const perPerson = isClosed ? day.finals.perPerson : live.perPerson
+  const payTotal = isClosed ? day.finals.totalFee : live.total
+  // ยอดค้างจากวันก่อน ๆ ของคนที่มาวันนี้ — ไม่นับวันนี้เอง
+  const priorByMember = new Map(
+    outstanding.groups
+      .filter((g) => g.memberId)
+      .map((g) => [g.memberId, { ...g, days: g.days.filter((d) => d.sessionId !== sessionId) }])
+      .filter(([, g]) => g.days.length > 0)
+      .map(([id, g]) => [id, { ...g, total: g.days.reduce((a, d) => a + d.amount, 0) }]),
+  )
 
   // เลือกแท็บที่ยังมีอยู่จริง — ค่าตั้งต้น 'board' ใช้กับวันที่จบแล้วไม่ได้
   const activeTab = tabs.some((t) => t.id === tab) ? tab : tabs[0].id
@@ -118,6 +143,7 @@ export default function PlayDayPage() {
     // ใช้ยอดจาก view ไม่ใช่ history.length เพราะ history ดึงมาแค่ 30 แถวล่าสุด
     // ตัวเลขบนแท็บจะได้ไม่ค้างที่ 30 ทั้งที่เล่นไปมากกว่านั้น
     games: summary?.finishedGames ?? 0,
+    unpaid: payers.filter((p) => !p.paidAt).length,
   }
 
   async function run(fn) {
@@ -441,6 +467,27 @@ export default function PlayDayPage() {
               {/* "วันนี้" ใช้ไม่ได้กับวันที่จบไปแล้ว มันเป็นวันอื่นในอดีต */}
               <h2>{isClosed ? 'สถิติของวันเล่นนี้' : 'สถิติวันนี้'}</h2>
               <SessionStats players={players} summary={summary} />
+            </section>
+          )}
+
+          {activeTab === 'collect' && (
+            <section className="panel">
+              <h2>เก็บเงิน</h2>
+              <PaymentPanel
+                payers={payers}
+                perPerson={perPerson}
+                total={payTotal}
+                live={!isClosed}
+                // ติ๊กจ่ายได้แม้วันจบแล้ว (โอนกันทีหลัง) — viewer แก้ไม่ได้
+                readOnly={!canEdit}
+                prior={priorByMember}
+                club={clubInfo}
+                dateLabel={thaiDate(day.playDate, { weekday: 'short', day: 'numeric', month: 'short' })}
+                onSetPaid={async (ids, paid) => {
+                  await outstanding.setPaid(ids, paid)
+                  await refreshBoard()
+                }}
+              />
             </section>
           )}
 

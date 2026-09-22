@@ -13,6 +13,7 @@ function mapPlayer(row) {
     status: row.status,
     gamesPlayed: row.games_played,
     paying: row.paying,
+    paidAt: row.paid_at,
     queuedAt: row.queue_seq,
     // rating ของสมาชิก (ข้ามวัน) — null สำหรับแขก / ยังไม่เคยจดแต้ม ให้ pairing ใช้ระดับมือแทน
     rating: row.members?.rating == null ? null : Number(row.members.rating),

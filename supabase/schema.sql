@@ -27,7 +27,8 @@ create extension if not exists "pgcrypto"; -- สำหรับ gen_random_uuid
 drop view if exists
   v_waiting_queue, v_court_board, v_match_history, v_billing_summary,
   v_session_player_stats, v_session_summary, v_pair_history,
-  v_club_days, v_member_stats, v_my_clubs, v_club_ranking, v_session_archive cascade;
+  v_club_days, v_member_stats, v_my_clubs, v_club_ranking, v_club_outstanding,
+  v_session_archive cascade;
 
 drop table if exists
   match_players, matches, courts, players, sessions,
@@ -87,6 +88,10 @@ create table clubs (
   active     boolean not null default true,
   -- ให้ทุกคนในก๊วนเห็นตัวเลข rating ไหม (คนจัดก๊วนเห็นเสมอ)
   show_rating boolean not null default true,
+  -- พร้อมเพย์ของคนเก็บเงิน ไว้สร้าง QR — เบอร์ 10 หลัก / เลขบัตร 13 หลัก / e-wallet 15 หลัก
+  -- สมาชิกทุกคนในก๊วนเห็น (ต้องเห็นถึงจะโอนได้)
+  promptpay_id   text check (promptpay_id ~ '^([0-9]{10}|[0-9]{13}|[0-9]{15})$'),
+  promptpay_name text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -322,6 +327,9 @@ create table players (
                  check (status in ('waiting', 'resting', 'playing', 'absent')),
   games_played int not null default 0 check (games_played >= 0),
   paying       boolean not null default true,
+  -- เวลาที่จ่ายเงินแล้ว (null = ยังไม่จ่าย) ติ๊กได้ทั้งระหว่างวันและหลังจบวัน
+  -- เพราะส่วนใหญ่โอนกันหลังเลิกเล่น
+  paid_at      timestamptz,
   -- ลำดับคิว: ใช้เลขรัน ไม่ใช่ timestamp เพื่อกันค่าชนกันเวลาเรียง
   queue_seq    bigserial,
   created_at   timestamptz not null default now(),
@@ -731,6 +739,27 @@ join players p  on p.id = mp.player_id
 join members mb on mb.id = p.member_id
 group by s.club_id, mb.id, mb.name, mb.rating, mb.default_skill, mb.rated_games;
 
+-- ยอดค้างจ่าย: หนึ่งแถวต่อคนต่อวันที่ยังไม่จ่าย ของวันที่จบแล้วเท่านั้น
+-- (วันที่ยังเล่นอยู่ยอดยังเปลี่ยนได้ จึงไม่นับเป็นหนี้)
+-- ใช้ยอดที่ freeze ไว้ (final_per_person) ไม่คำนวณใหม่ — แบบเดียวกับ v_club_days
+-- ฝั่งแอปรวมเป็นรายคนเอง: สมาชิกรวมด้วย member_id ข้ามวัน แขกแยกเป็นรายวัน
+create or replace view v_club_outstanding as
+select
+  s.club_id,
+  s.id               as session_id,
+  s.play_date,
+  p.id               as player_id,
+  p.member_id,
+  p.name,
+  s.final_per_person as amount
+from players p
+join sessions s on s.id = p.session_id
+where s.status = 'done'
+  and p.paying
+  and p.status <> 'absent'
+  and p.paid_at is null
+  and s.final_per_person > 0;
+
 -- ก๊วนที่ฉันเข้าถึงได้ พร้อมบทบาทและวันเล่นล่าสุด/ถัดไป
 create or replace view v_my_clubs as
 select
@@ -750,7 +779,9 @@ select
   (select max(s.play_date) from sessions s where s.club_id = c.id and s.status = 'done') as last_played_on,
   (select min(s.play_date) from sessions s
     where s.club_id = c.id and s.status = 'planned' and s.play_date >= current_date) as next_play_date,
-  c.show_rating
+  c.show_rating,
+  c.promptpay_id,
+  c.promptpay_name
 from clubs c
 join club_access a on a.club_id = c.id and a.user_id = auth.uid();
 
@@ -769,6 +800,7 @@ alter view v_pair_history         set (security_invoker = on);
 alter view v_club_days            set (security_invoker = on);
 alter view v_member_stats         set (security_invoker = on);
 alter view v_club_ranking         set (security_invoker = on);
+alter view v_club_outstanding     set (security_invoker = on);
 alter view v_my_clubs             set (security_invoker = on);
 
 

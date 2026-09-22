@@ -1,6 +1,8 @@
 import assert from 'node:assert'
 import { pickNextMatch, pairKey, winChance, skillRating } from '../src/utils/pairing.js'
 import { byRanking } from '../src/utils/ranking.js'
+import { computeBilling, groupOutstanding, dayPaymentText, outstandingText } from '../src/utils/billing.js'
+import { promptPayPayload, crc16, isPromptPayId } from '../src/utils/promptpay.js'
 const P = (id, skill, g = 0) => ({ id, skill, gamesPlayed: g, queuedAt: id })
 const sum = (t) => t.reduce((s, p) => s + p.skill, 0)
 // sequential: balanced split of first 4 (3+1 vs 2+2 -> gap 0)
@@ -33,4 +35,28 @@ const R = (name, wins, losses, pointDiff = 0) => ({ name, wins, losses, pointDif
 const order = [R('lucky', 1, 0), R('grinder', 6, 4), R('ace', 8, 2), R('twin+', 3, 1, 12), R('twin-', 3, 1, 5)]
   .sort(byRanking).map((r) => r.name)
 assert.deepEqual(order, ['ace', 'twin+', 'twin-', 'grinder', 'lucky'])
+// billing: absent and non-paying excluded from the divisor, resting still pays
+const who = [{ status: 'waiting' }, { status: 'resting' }, { status: 'absent' }, { status: 'playing', paying: false }]
+const bill = computeBilling({ players: who, courts: [{ hours: 2 }, { hours: '1.5' }], billing: { hourlyRate: '200', shuttlePrice: '80', shuttleCount: '3' } })
+assert.deepEqual([bill.total, bill.payerCount, bill.perPerson], [940, 2, 470])
+
+// outstanding: members merge across days, guests stay per day, biggest debt first
+const g = groupOutstanding([
+  { memberId: 'm1', playerId: 'p1', name: 'Ae', playDate: '2026-09-20', amount: 130 },
+  { memberId: 'm1', playerId: 'p2', name: 'Ae', playDate: '2026-09-13', amount: 120 },
+  { memberId: null, playerId: 'p3', name: 'Guest', playDate: '2026-09-20', amount: 130 },
+  { memberId: null, playerId: 'p4', name: 'Guest', playDate: '2026-09-13', amount: 120 },
+])
+assert.deepEqual(g.map((x) => [x.name, x.total, x.days.length]), [['Ae', 250, 2], ['Guest', 130, 1], ['Guest', 120, 1]])
+assert.equal(g[0].days[0].playDate, '2026-09-13')
+assert.ok(outstandingText({ clubName: 'C', groups: g, club: {} }).includes('Guest 130 บาท (แขก 20 ก.ย.)'))
+assert.ok(dayPaymentText({ clubName: 'C', dateLabel: 'd', total: 260, perPerson: 130, live: true,
+  payers: [{ name: 'Ae', paidAt: 'x' }, { name: 'Bee' }], club: { promptpayId: '0812345678' } }).includes('ยังไม่จ่าย (1): Bee'))
+
+// PromptPay: CRC standard check value + payloads matched against the promptpay-qr library
+assert.equal(crc16('123456789'), '29B1')
+assert.equal(promptPayPayload('0812345678'), '00020101021129370016A000000677010111011300668123456785802TH530376463045D82')
+assert.equal(promptPayPayload('0812345678', 130), '00020101021229370016A000000677010111011300668123456785802TH53037645406130.00630496CE')
+assert.ok(isPromptPayId('0812345678') && isPromptPayId('1234567890123') && !isPromptPayId('081234567'))
+
 console.log('pairing ok')

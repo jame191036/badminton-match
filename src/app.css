@@ -443,6 +443,37 @@
 
 .btn-finish { width: 100%; }
 
+/* ---------- เก็บเงิน / ค้างจ่าย ---------- */
+.payment { display: flex; flex-direction: column; gap: 12px; }
+.payment-summary { margin: 0; font-weight: 600; }
+.payment-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.payment-notice { margin: 0; font-size: 0.85rem; color: var(--court); font-weight: 600; }
+.payment-item { flex-wrap: wrap; }
+.payment-item.is-paid .billing-amount { color: var(--court); }
+/* ยอดค้างเก่าขึ้นบรรทัดใหม่ใต้ชื่อ สีส้มให้คนเก็บเงินเห็นทันที */
+.payment-owed {
+  flex: 1 1 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--coral);
+}
+.outstanding-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.outstanding-card { padding: 12px 14px; border: 1px solid var(--border-muted); border-radius: 12px; display: flex; flex-direction: column; gap: 8px; }
+.outstanding-head { display: flex; align-items: center; gap: 8px; }
+.outstanding-head strong { margin-left: auto; color: var(--coral); }
+.outstanding-days { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; }
+.outstanding-days li { display: flex; align-items: center; gap: 10px; }
+.outstanding-days li .mono { margin-left: auto; }
+/* QR: พื้นขาวเสมอแม้ธีมมืด ไม่งั้นแอปธนาคารบางตัวสแกนไม่ติด */
+.qr-box { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 12px; border: 1px solid var(--border-muted); border-radius: 12px; }
+.qr-box img { width: 200px; height: 200px; background: #fff; padding: 8px; border-radius: 8px; image-rendering: pixelated; }
+.qr-info { display: flex; flex-direction: column; gap: 4px; }
+.qr-label { font-size: 0.8rem; color: var(--text-faint); }
+.qr-amount { font-size: 1.4rem; color: var(--court-dark); }
+
 /* แต้มก่อนจบเกม — ช่องเล็กสองช่องตรงกลาง ฝั่ง A ซ้าย ฝั่ง B ขวา ตรงกับทีมบนการ์ด */
 .finish-form { display: flex; flex-direction: column; gap: 8px; }
 .score-inputs { display: flex; align-items: center; justify-content: center; gap: 8px; }

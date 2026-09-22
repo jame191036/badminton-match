@@ -164,6 +164,23 @@ export function useClubDays(clubId) {
     [clubId, refetch],
   )
 
+  // พร้อมเพย์ของคนเก็บเงิน (RLS ยอมเฉพาะเจ้าของ) — ว่าง = ลบ
+  const setPromptPay = useCallback(
+    async (id, name) => {
+      const { error: err } = await supabase
+        .from('clubs')
+        .update({ promptpay_id: id || null, promptpay_name: name?.trim() || null })
+        .eq('id', clubId)
+      if (err) {
+        // check constraint ของเลขพร้อมเพย์ — ข้อความ Postgres เป็นอังกฤษ แปลให้
+        if (err.code === '23514') throw new Error('เลขพร้อมเพย์ต้องเป็นเบอร์มือถือ 10 หลัก เลขบัตร 13 หลัก หรือ e-wallet 15 หลัก')
+        throw new Error(err.message)
+      }
+      refetch()
+    },
+    [clubId, refetch],
+  )
+
   const deleteClub = useCallback(async () => {
     const { error: err } = await supabase.from('clubs').delete().eq('id', clubId)
     if (err) throw new Error(err.message)
@@ -182,6 +199,7 @@ export function useClubDays(clubId) {
     cancelDay,
     renameClub,
     setShowRating,
+    setPromptPay,
     deleteClub,
   }
 }

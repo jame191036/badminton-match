@@ -9,7 +9,7 @@ npm run dev      # Vite dev server
 npm run build    # production build
 npm run preview  # serve the build
 npm run lint     # eslint .
-npm run check    # assert-based self-check of src/utils/pairing.js and ranking.js
+npm run check    # assert-based self-check of src/utils/{pairing,ranking,billing,promptpay}.js
 ```
 
 No test framework is set up in this repo.
@@ -22,7 +22,7 @@ A badminton club ("ก๊วน") manager, two layers deep: a **club** is the st
 
 Rationale for every structural decision lives in [`docs/redesign-plan.md`](docs/redesign-plan.md) — read it before changing the shape of anything.
 
-Stack: React 19 + Vite (aliased to `rolldown-vite`) + Supabase (auth, Postgres, realtime) + react-router-dom. No state library, no CSS framework — plain CSS in `src/index.css` / `src/app.css` driven by CSS variables and a `data-theme` attribute.
+Stack: React 19 + Vite (aliased to `rolldown-vite`) + Supabase (auth, Postgres, realtime) + react-router-dom + `qrcode-generator` (only to draw the PromptPay QR). No state library, no CSS framework — plain CSS in `src/index.css` / `src/app.css` driven by CSS variables and a `data-theme` attribute.
 
 ## Architecture
 
@@ -38,7 +38,7 @@ Auth is email + password (`useAuth`), with a reset-password flow: `onAuthStateCh
 - Single-table writes go through `supabase.from(...)`; anything touching multiple tables goes through an RPC in `supabase/functions.sql` so it is one transaction.
 - `match_players` has no `session_id` column, so its subscription has no filter and fires for all rows; `refetchAll` filters.
 
-**Pairing logic is pure and isolated** in `src/utils/pairing.js` — keep it that way; it and `src/utils/ranking.js` are the only parts of the app testable without a database. Skill is 1–3 and `SKILL_LEVELS` here is the single source of the labels.
+**Pairing logic is pure and isolated** in `src/utils/pairing.js` — keep it that way; it, `ranking.js`, `billing.js` and `promptpay.js` in `src/utils/` are the parts of the app testable without a database. Node runs them directly for `npm run check`, so imports between them must carry the `.js` extension. Skill is 1–3 and `SKILL_LEVELS` here is the single source of the labels.
 
 `pickNextMatch(waiting, { mode, pairStats })` has two modes, chosen by `sessions.queue_mode`:
 - `sequential` — sort by `gamesPlayed` then `queuedAt`, take the first 4, and pick the 2v2 split with the smallest skill-sum gap.
@@ -102,7 +102,7 @@ Note `players.status = 'playing'` means "assigned to a court", including a `pend
 
 All views are declared `security_invoker = on` so RLS on the underlying tables actually applies — without it a view runs as its owner and any authenticated user could read another owner's session by guessing its id. Keep that setting on any new view.
 
-Views `v_match_history`, `v_session_player_stats`, `v_session_summary`, `v_club_days`, `v_my_clubs`, `v_member_stats` and `v_club_ranking` are queried. `v_club_days` is the club's calendar — for a `done` day it reads the frozen `final_*` columns and for any other day it shows a live estimate; never make the `done` branch recompute. The list of people a club is shared with is an RPC (`list_club_members`), not a view, because `authenticated` cannot select from `auth.users` and `security_invoker` would therefore fail.
+Views `v_match_history`, `v_session_player_stats`, `v_session_summary`, `v_club_days`, `v_my_clubs`, `v_member_stats`, `v_club_ranking` and `v_club_outstanding` are queried. `v_club_days` is the club's calendar — for a `done` day it reads the frozen `final_*` columns and for any other day it shows a live estimate; never make the `done` branch recompute. The list of people a club is shared with is an RPC (`list_club_members`), not a view, because `authenticated` cannot select from `auth.users` and `security_invoker` would therefore fail.
 
 Minutes played are derived from `matches.started_at`/`ended_at` in `v_session_player_stats` and merged onto players as `minutesPlayed` — `players.games_played` stays the column that drives queue order. Billing is recomputed client-side in `BillingPanel.jsx` and must stay in agreement with `v_billing_summary`:
 
@@ -113,6 +113,12 @@ each    = (court + shuttle) / players where paying and status <> 'absent'
 ```
 
 The split is **equal among everyone who actually turned up** — never per game or per minute played. Two exclusions only: `paying = false`, and `status = 'absent'` (signed up in advance but did not come). Resting and playing players still count as payers.
+
+The formula exists once client-side, `computeBilling` in `src/utils/billing.js`; both the billing tab and the collect tab use it.
+
+**Collecting money.** `players.paid_at` (null = unpaid) is ticked from the day's "เก็บเงิน" tab or the club's "ค้างจ่าย" tab — a plain single-table update, allowed for owner/editor by the existing players policy, **including after the day is closed**, because most people transfer after playing. `v_club_outstanding` lists one row per payer per `done` day still unpaid, at the frozen `final_per_person`; a day still playing is never debt because its total can move. The app groups those rows per member across days (`groupOutstanding`); guests have no member, so each of their days stays separate and the reminder text dates them. The collect tab also shows each member's unpaid earlier days and can settle today plus those in one tap.
+
+PromptPay lives on the club (`promptpay_id`, `promptpay_name`), set by the owner only (clubs update policy) and readable by every member — they need it to pay. `promptPayPayload` builds the EMVCo string by hand (tag-length-value + CRC-16/CCITT-FALSE); it was checked byte-for-byte against the `promptpay-qr` library and by decoding the rendered QR, and `npm run check` pins those payloads. Messages go out through `navigator.share` on phones (so LINE is one tap) and fall back to the clipboard.
 
 Prices live on the day, never on the master row. `venues.default_hourly_rate` exists purely to prefill the form and is copied into `sessions.hourly_rate`; nothing reads it at billing time. `shuttle_brands` deliberately has no price column at all.
 

@@ -5,6 +5,7 @@ import { usePastDays } from '../hooks/usePastDays'
 import ClubSharePanel from '../components/ClubSharePanel'
 import ClubSettingsPanel from '../components/ClubSettingsPanel'
 import ClubRanking from '../components/ClubRanking'
+import OutstandingPanel from '../components/OutstandingPanel'
 import { SkeletonHead, SkeletonList } from '../components/Skeleton'
 import { clock, thaiDate, todayISO } from '../utils/date'
 import { useConfirm } from '../hooks/useConfirm'
@@ -37,6 +38,7 @@ export default function ClubPage() {
     cancelDay,
     renameClub,
     setShowRating,
+    setPromptPay,
     deleteClub,
   } = useClubDays(clubId)
   // อ่านนาฬิกาครั้งเดียวตอน mount — ไม่อ่านระหว่าง render
@@ -121,6 +123,7 @@ export default function ClubPage() {
           {[
             { id: 'days', label: 'วันเล่น' },
             { id: 'ranking', label: 'อันดับ' },
+            { id: 'outstanding', label: 'ค้างจ่าย' },
             { id: 'share', label: 'คนในก๊วน' },
             { id: 'settings', label: 'ตั้งค่า' },
           ].map((t) => (
@@ -139,7 +142,9 @@ export default function ClubPage() {
 
         {actionError && <p className="auth-error">{actionError}</p>}
 
-        {tab === 'ranking' ? (
+        {tab === 'outstanding' ? (
+          <OutstandingPanel clubId={clubId} club={club} canEdit={canEdit} />
+        ) : tab === 'ranking' ? (
           <ClubRanking clubId={clubId} showRating={club.showRating || canEdit} />
         ) : tab === 'share' ? (
           <ClubSharePanel clubId={clubId} isOwner={club.role === 'owner'} />
@@ -150,6 +155,7 @@ export default function ClubPage() {
             stats={{ dayCount: club.totalDays }}
             onRename={renameClub}
             onToggleRating={setShowRating}
+            onSavePromptPay={setPromptPay}
             onDelete={async () => {
               await deleteClub()
               navigate('/')

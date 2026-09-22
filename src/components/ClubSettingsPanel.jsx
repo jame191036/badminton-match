@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useConfirm } from '../hooks/useConfirm'
+import { isPromptPayId } from '../utils/promptpay'
 
 /**
  * ตั้งค่าก๊วน: เปลี่ยนชื่อ และลบก๊วน
@@ -8,12 +9,41 @@ import { useConfirm } from '../hooks/useConfirm'
  * (วันเล่น ประวัติเกม ยอดเงิน — on delete cascade) ถ้าวางเป็นปุ่มเรียงในลิสต์
  * ข้างๆ ปุ่มลบอย่างอื่นที่ไม่ร้ายแรงเท่ากัน จะกดพลาดง่ายเกินไป
  */
-export default function ClubSettingsPanel({ club, stats, onRename, onToggleRating, onDelete }) {
+export default function ClubSettingsPanel({
+  club,
+  stats,
+  onRename,
+  onToggleRating,
+  onSavePromptPay,
+  onDelete,
+}) {
   const confirm = useConfirm()
   const [name, setName] = useState(club.name)
   const [note, setNote] = useState(club.note ?? '')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [ppId, setPpId] = useState(club.promptpayId ?? '')
+  const [ppName, setPpName] = useState(club.promptpayName ?? '')
+  const [ppNotice, setPpNotice] = useState('')
+  // พิมพ์มีขีดหรือเว้นวรรคได้ (081-234-5678) เก็บเฉพาะตัวเลข
+  const ppDigits = ppId.replace(/\D/g, '')
+  const ppDirty = ppDigits !== (club.promptpayId ?? '') || ppName.trim() !== (club.promptpayName ?? '')
+  const ppValid = ppDigits === '' || isPromptPayId(ppDigits)
+
+  async function handlePromptPay(e) {
+    e.preventDefault()
+    setError('')
+    setPpNotice('')
+    setBusy(true)
+    try {
+      await onSavePromptPay(ppDigits, ppName)
+      setPpNotice(ppDigits ? 'บันทึกแล้ว — แท็บเก็บเงินและค้างจ่ายจะมี QR ให้สแกน' : 'ลบเลขพร้อมเพย์แล้ว')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const isOwner = club.role === 'owner'
   const dirty = name.trim() !== club.name || (note.trim() || '') !== (club.note ?? '')
@@ -84,6 +114,41 @@ export default function ClubSettingsPanel({ club, stats, onRename, onToggleRatin
       </form>
 
       {error && <p className="auth-error">{error}</p>}
+
+      <form className="day-form" onSubmit={handlePromptPay}>
+        <h3 className="section-head">พร้อมเพย์สำหรับเก็บเงิน</h3>
+        <p className="panel-hint">
+          ใส่แล้วแท็บเก็บเงินกับค้างจ่ายจะสร้าง QR ที่มียอดให้สแกนจ่ายได้เลย · สมาชิกในก๊วนทุกคนเห็นเลขนี้
+        </p>
+        <label className="field">
+          <span className="field-label">เบอร์มือถือ / เลขบัตรประชาชน / e-wallet</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            placeholder="เช่น 081-234-5678"
+            value={ppId}
+            onChange={(e) => setPpId(e.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span className="field-label">ชื่อบัญชี (ไม่บังคับ)</span>
+          <input
+            type="text"
+            placeholder="ให้คนโอนเห็นว่าโอนถูกคน"
+            value={ppName}
+            onChange={(e) => setPpName(e.target.value)}
+          />
+        </label>
+        {!ppValid && (
+          <p className="auth-error">ต้องเป็นเบอร์มือถือ 10 หลัก เลขบัตร 13 หลัก หรือ e-wallet 15 หลัก</p>
+        )}
+        {ppNotice && <p className="payment-notice">{ppNotice}</p>}
+        <div className="form-actions">
+          <button className="btn-primary" type="submit" disabled={busy || !ppDirty || !ppValid}>
+            บันทึกพร้อมเพย์
+          </button>
+        </div>
+      </form>
 
       <label className="guest-toggle rating-toggle">
         <input

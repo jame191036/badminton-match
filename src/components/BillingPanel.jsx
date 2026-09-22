@@ -1,9 +1,5 @@
 import { useState } from 'react'
-
-function toNumber(v) {
-  const n = parseFloat(v)
-  return Number.isFinite(n) && n >= 0 ? n : 0
-}
+import { computeBilling, isPayer, toNumber } from '../utils/billing'
 
 function formatBaht(n) {
   return n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -61,20 +57,12 @@ export default function BillingPanel({
   onTogglePaying,
   onChangeCourtHours,
 }) {
-  const hourlyRate = toNumber(billing.hourlyRate)
-  const shuttlePrice = toNumber(billing.shuttlePrice)
-  const shuttleCount = toNumber(billing.shuttleCount)
+  // สูตรอยู่ที่ utils/billing.js ที่เดียว (แท็บเก็บเงินใช้ตัวเดียวกัน) — ต้องตรงกับ v_billing_summary
+  const { hourlyRate, shuttleCount, totalHours, courtTotal, shuttleTotal, total, payerCount, perPerson: perTotal } =
+    computeBilling({ players, courts, billing })
 
-  const totalHours = courts.reduce((s, c) => s + toNumber(c.hours), 0)
-  const courtTotal = totalHours * hourlyRate
-  const shuttleTotal = shuttleCount * shuttlePrice
-  const total = courtTotal + shuttleTotal
-
-  // คนที่กด "ไม่มา" ไม่ถูกนับทั้งตัวหารและรายชื่อ — ต้องตรงกับ v_billing_summary
+  // คนที่กด "ไม่มา" ไม่ถูกนับทั้งตัวหารและรายชื่อ
   const present = players.filter((p) => p.status !== 'absent')
-  const payerCount = present.filter((p) => p.paying !== false).length
-  // หารเท่ากันทุกคนที่มาและร่วมจ่าย ไม่หารตามจำนวนเกมที่เล่น
-  const perTotal = payerCount > 0 ? total / payerCount : 0
 
   if (present.length === 0) {
     return <p className="empty-state">ยังไม่มีคนที่มาเล่น ถึงจะหารค่าใช้จ่ายได้</p>
@@ -173,7 +161,7 @@ export default function BillingPanel({
         <h3>ผู้ร่วมจ่าย ({payerCount}/{present.length})</h3>
         <ul className="billing-list">
           {present.map((p) => {
-            const isPaying = p.paying !== false
+            const isPaying = isPayer(p)
             return (
               <li key={p.id} className={`billing-item ${isPaying ? '' : 'excluded'}`}>
                 <label className="billing-checkbox">
