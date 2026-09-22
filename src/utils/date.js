@@ -36,16 +36,18 @@ export function thaiMonthYear(yearMonth) {
   })
 }
 
-/** '2026-09-12' -> 'เสาร์ 12 ก.ย. 2569' */
-export function thaiFullDate(iso) {
+/** 'YYYY-MM-DD' -> วันที่ภาษาไทย ตาม options ของ toLocaleDateString (ว่าง = '') */
+export function thaiDate(iso, options) {
   if (!iso) return ''
-  return new Date(`${iso}T00:00:00`).toLocaleDateString('th-TH', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  })
+  return new Date(`${iso}T00:00:00`).toLocaleDateString('th-TH', options)
 }
+
+/** '2026-09-12' -> 'เสาร์ 12 ก.ย. 2569' */
+export const thaiFullDate = (iso) =>
+  thaiDate(iso, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+
+/** เวลาจาก DB ('19:00:00') -> '19:00' */
+export const clock = (t) => (t ? String(t).slice(0, 5) : '')
 
 /** เลื่อนเดือน: ('2026-09', 1) -> '2026-10' */
 export function addMonths(yearMonth, months) {
@@ -90,4 +92,20 @@ export function hoursBetween(start, end) {
   const [eh, em] = end.split(':').map(Number)
   const diff = (((eh * 60 + em - (sh * 60 + sm)) % 1440) + 1440) % 1440
   return diff / 60
+}
+
+/** วินาที -> 'mm:ss' ใช้ทั้งนาฬิกาบนคอร์ตและเวลาต่อเกมในประวัติ (null = ไม่แสดง) */
+export function mmss(seconds) {
+  if (seconds == null) return null
+  const total = Math.max(0, Math.floor(seconds))
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+}
+
+/** นาที -> '45 นาที' / '2 ชม.' / '2 ชม. 30 นาที' (0 หรือว่าง = '—') */
+export function formatMinutes(min) {
+  if (!min) return '—'
+  const h = Math.floor(min / 60)
+  const m = min % 60
+  if (h === 0) return `${m} นาที`
+  return m === 0 ? `${h} ชม.` : `${h} ชม. ${m} นาที`
 }

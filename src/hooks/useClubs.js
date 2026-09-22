@@ -1,20 +1,33 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { useLoad } from './useLoad'
 
-function mapClub(row) {
+export const ROLE_LABEL = {
+  owner: 'เจ้าของ',
+  editor: 'จัดก๊วนได้',
+  viewer: 'ดูอย่างเดียว',
+}
+
+export function mapClub(row) {
   return {
     id: row.id,
     ownerId: row.owner_id,
     name: row.name,
     note: row.note,
-    active: row.active,
     role: row.role,
     isMine: row.is_mine,
+    // นับจาก view ไม่ได้นับจากแถวที่โหลดมา เพราะประวัติไม่ได้โหลดครบ
     doneDays: row.done_days ?? 0,
     plannedDays: row.planned_days ?? 0,
+    cancelledDays: row.cancelled_days ?? 0,
+    // รวมทุกสถานะ รวม playing กับ cancelled ที่สองตัวบนไม่ได้นับ
+    totalDays: row.total_days ?? 0,
     playingSessionId: row.playing_session_id,
     lastPlayedOn: row.last_played_on,
     nextPlayDate: row.next_play_date,
+    showRating: row.show_rating ?? true,
+    promptpayId: row.promptpay_id,
+    promptpayName: row.promptpay_name,
   }
 }
 
@@ -23,37 +36,11 @@ function mapClub(row) {
  * v_my_clubs กรองด้วย club_access ให้แล้ว จึงไม่ต้องส่ง userId เข้าไปกรองซ้ำ
  */
 export function useClubs(userId) {
-  const [clubs, setClubs] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [reloadKey, setReloadKey] = useState(0)
-
-  const refetch = useCallback(() => setReloadKey((k) => k + 1), [])
-
-  useEffect(() => {
-    if (!userId) return
-    let alive = true
-
-    async function load() {
-      const { data, error: err } = await supabase
-        .from('v_my_clubs')
-        .select('*')
-        .order('name')
-
-      if (!alive) return
-      if (err) setError(err.message)
-      else {
-        setClubs((data ?? []).map(mapClub))
-        setError('')
-      }
-      setLoading(false)
-    }
-
-    load()
-    return () => {
-      alive = false
-    }
-  }, [userId, reloadKey])
+  const fetcher = useCallback(
+    () => (userId ? supabase.from('v_my_clubs').select('*').order('name') : null),
+    [userId],
+  )
+  const { data, loading, error, refetch } = useLoad(fetcher)
 
   // ต้องผ่าน RPC: สร้างก๊วนแล้วต้องใส่แถว club_access ให้ตัวเองด้วย (2 ตาราง)
   const createClub = useCallback(
@@ -69,31 +56,11 @@ export function useClubs(userId) {
     [refetch],
   )
 
-  const updateClub = useCallback(
-    async (id, values) => {
-      const { error: err } = await supabase.from('clubs').update(values).eq('id', id)
-      if (err) throw new Error(err.message)
-      refetch()
-    },
-    [refetch],
-  )
-
-  const removeClub = useCallback(
-    async (id) => {
-      const { error: err } = await supabase.from('clubs').delete().eq('id', id)
-      if (err) throw new Error(err.message)
-      refetch()
-    },
-    [refetch],
-  )
-
   return {
-    clubs,
-    loading: userId ? loading : false,
+    clubs: (data ?? []).map(mapClub),
+    loading,
     error,
     createClub,
-    updateClub,
-    removeClub,
     refetch,
   }
 }

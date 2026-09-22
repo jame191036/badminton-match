@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { useLoad } from './useLoad'
 
 /**
  * CRUD ของตาราง master ที่ผูกกับเจ้าของบัญชี (venues, shuttle_brands)
@@ -10,38 +11,11 @@ import { supabase } from '../lib/supabaseClient'
  * บอกค่าให้ครบ ไม่ใช่การตรวจสิทธิ์
  */
 export function useMasterList(table, userId) {
-  const [items, setItems] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [reloadKey, setReloadKey] = useState(0)
-
-  const refetch = useCallback(() => setReloadKey((k) => k + 1), [])
-
-  useEffect(() => {
-    if (!userId) return
-    let alive = true
-
-    async function load() {
-      const { data, error: err } = await supabase
-        .from(table)
-        .select('*')
-        .eq('owner_id', userId)
-        .order('name')
-
-      if (!alive) return
-      if (err) setError(err.message)
-      else {
-        setItems(data ?? [])
-        setError('')
-      }
-      setLoading(false)
-    }
-
-    load()
-    return () => {
-      alive = false
-    }
-  }, [table, userId, reloadKey])
+  const fetcher = useCallback(
+    () => (userId ? supabase.from(table).select('*').eq('owner_id', userId).order('name') : null),
+    [table, userId],
+  )
+  const { data, loading, error, refetch } = useLoad(fetcher)
 
   const add = useCallback(
     async (values) => {
@@ -78,10 +52,8 @@ export function useMasterList(table, userId) {
   )
 
   return {
-    items,
-    // ไม่มี id = ไม่ได้กำลังโหลด ไม่ใช่โหลดค้าง — คำนวณตรงนี้แทนการ
-    // setState ในเอฟเฟกต์ ซึ่งทำให้เกิด render ซ้อนโดยไม่จำเป็น
-    loading: userId ? loading : false,
+    items: data ?? [],
+    loading,
     error,
     add,
     update,

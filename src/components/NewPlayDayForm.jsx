@@ -6,27 +6,14 @@ import { useShuttleModels } from '../hooks/useShuttleModels'
 import SearchSelect from './SearchSelect'
 import SearchBox from './SearchBox'
 import DatePicker from './DatePicker'
-import { QUEUE_MODES, SKILL_LEVELS } from '../utils/pairing'
-import { addDays, addHours, hoursBetween, todayISO } from '../utils/date'
+import { QUEUE_MODES, skillLabel } from '../utils/pairing'
+import { addDays, addHours, clock, hoursBetween, thaiDate, todayISO } from '../utils/date'
 
 // เวลาเริ่มที่ก๊วนแบดใช้กันจริง ๆ และความยาวที่จองกันบ่อย
 const START_PRESETS = ['17:00', '18:00', '19:00', '20:00']
 const DURATION_PRESETS = [1, 2, 3]
 
-function shortThaiDate(iso) {
-  return new Date(`${iso}T00:00:00`).toLocaleDateString('th-TH', {
-    day: 'numeric',
-    month: 'short',
-  })
-}
-
-function shortWeekday(iso) {
-  return new Date(`${iso}T00:00:00`).toLocaleDateString('th-TH', { weekday: 'short' })
-}
-
-const BLANK_COURT = { name: '', hours: '' }
-
-// ขนาด/ความหนาเส้นของไอคอนหัวข้อ ให้ตรงกับ SVG ที่เขียนมือไว้ที่อื่นในแอป
+// ขนาด/ความหนาเส้นของไอคอนหัวข้อ ให้ตรงกับไอคอนอื่นในแอป
 const ICON = { size: 19, strokeWidth: 1.8, className: 'form-section-icon', 'aria-hidden': true }
 
 /**
@@ -64,7 +51,8 @@ export default function NewPlayDayForm({
   const [shuttleCount, setShuttleCount] = useState(initial?.shuttleCount ?? '')
   const [hourlyRate, setHourlyRate] = useState(initial?.hourlyRate ?? '')
   const [shuttlePrice, setShuttlePrice] = useState(initial?.shuttlePrice ?? '')
-  const [queueMode, setQueueMode] = useState(initial?.queueMode ?? 'sequential')
+  const [queueMode, setQueueMode] = useState(initial?.queueMode ?? 'rotate')
+  const [forceRest, setForceRest] = useState(initial?.forceRest ?? true)
   const [memberQuery, setMemberQuery] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -89,11 +77,12 @@ export default function NewPlayDayForm({
         setVenueId(d.venue_id ?? '')
         setBrandId(d.shuttle_brand_id ?? '')
         setModelId(d.shuttle_model_id ?? '')
-        setStartTime(d.start_time ? String(d.start_time).slice(0, 5) : '')
-        setEndTime(d.end_time ? String(d.end_time).slice(0, 5) : '')
+        setStartTime(clock(d.start_time))
+        setEndTime(clock(d.end_time))
         setHourlyRate(d.hourly_rate ? String(d.hourly_rate) : '')
         setShuttlePrice(d.shuttle_price ? String(d.shuttle_price) : '')
-        setQueueMode(d.queue_mode ?? 'sequential')
+        setQueueMode(d.queue_mode ?? 'rotate')
+        setForceRest(d.force_rest ?? true)
         if (Array.isArray(d.courts) && d.courts.length > 0) {
           setCourts(d.courts.map((c) => ({ name: c.name, hours: String(c.hours ?? '') })))
         }
@@ -139,7 +128,6 @@ export default function NewPlayDayForm({
         name: c.name.trim() || `คอร์ต ${i + 1}`,
         hours: Number(c.hours) || 0,
       }))
-      .filter((c) => c.name)
 
     // required บน input ใช้ไม่ได้ถ้าส่วนนั้นถูกพับอยู่ เพราะ FormSection
     // ถอด children ออกจาก DOM ไปเลย เบราว์เซอร์จึงไม่เห็นช่องที่ต้องตรวจ
@@ -169,6 +157,7 @@ export default function NewPlayDayForm({
         shuttlePrice: shuttlePrice === '' ? null : Number(shuttlePrice),
         shuttleCount: shuttleCount === '' ? 0 : Number(shuttleCount),
         queueMode,
+        forceRest,
         memberIds: initial ? undefined : [...selected],
         courts: cleanCourts,
       })
@@ -179,13 +168,7 @@ export default function NewPlayDayForm({
   }
 
   // ---- สรุปบรรทัดเดียวของแต่ละส่วน ใช้ตอนพับอยู่ ----
-  const dateLabel = playDate
-    ? new Date(`${playDate}T00:00:00`).toLocaleDateString('th-TH', {
-        weekday: 'short',
-        day: 'numeric',
-        month: 'short',
-      })
-    : 'ยังไม่เลือกวัน'
+  const dateLabel = thaiDate(playDate, { weekday: 'short', day: 'numeric', month: 'short' }) || 'ยังไม่เลือกวัน'
   const timeLabel = [startTime, endTime].filter(Boolean).join('–')
 
   // ปุ่มลัดเลือกวัน — หนึ่งสัปดาห์เต็มนับจากวันนี้ เรียงตามวันจริง ไม่ใช่เรียงตามชื่อวัน
@@ -193,26 +176,50 @@ export default function NewPlayDayForm({
   const weekChips = Array.from({ length: 7 }, (_, i) => {
     const value = addDays(today, i)
     // ต่อวันที่ท้ายชื่อวัน ไม่งั้นไม่รู้ว่า "ส." คือเสาร์ไหน
-    return { label: shortWeekday(value), value, sub: shortThaiDate(value) }
+    return {
+      label: thaiDate(value, { weekday: 'short' }),
+      value,
+      sub: thaiDate(value, { day: 'numeric', month: 'short' }),
+    }
   })
 
   const duration = hoursBetween(startTime, endTime)
+  // hoursBetween วนรอบ 24 ชม. — เวลาจบก่อนเริ่ม (พิมพ์ผิด) ได้ ~22 ชม. ไม่ใช่ชั่วโมงที่จองจริง
+  const bookable = (h) => h > 0 && h <= 12
+
+  /**
+   * ตั้งเวลาเริ่ม/จบ แล้วให้ชั่วโมงของคอร์ตตามความยาวที่นัดไว้
+   *
+   * ส่วนใหญ่จองทุกคอร์ตเท่ากับเวลาที่นัด ถ้าไม่ตามให้ ช่องชั่วโมงจะว่าง (ค่าสนาม = 0)
+   * หรือค้างค่าเก่าตอนแก้เวลา แตะเฉพาะคอร์ตที่ยังว่างหรือเท่ากับความยาวเดิม
+   * คอร์ตที่กรอกต่างออกไปเอง (เช่นจองคอร์ตสองแค่ชั่วโมงเดียว) ไม่ถูกเขียนทับ
+   */
+  function setTimes(start, end) {
+    const prev = hoursBetween(startTime, endTime)
+    const next = hoursBetween(start, end)
+    setStartTime(start)
+    setEndTime(end)
+    if (!bookable(next)) return
+    setCourts((cs) =>
+      cs.map((c) =>
+        c.hours === '' || Number(c.hours) === prev ? { ...c, hours: String(next) } : c,
+      ),
+    )
+  }
 
   function pickStart(time) {
-    setStartTime(time)
     // รักษาความยาวเดิมไว้ ถ้ายังไม่เคยใส่เวลาจบก็ให้ 3 ชม. เป็นค่าเริ่ม
     //
     // ต้องเช็คช่วง ไม่ใช่แค่ว่ามีค่าไหม เพราะ hoursBetween วนรอบ 24 ชม.
     // เวลาจบก่อนเวลาเริ่ม (พิมพ์ผิด) จะออกมาเป็น ~22 ชม. ส่วนเวลาเท่ากันได้ 0
     // ทั้งสองแบบเอามาคูณต่อไม่ได้ ให้ตกกลับไปใช้ 3 ชม. แทน
     const keep = duration && duration > 0 && duration <= 8 ? duration : 3
-    setEndTime(addHours(time, keep))
+    setTimes(time, addHours(time, keep))
   }
 
   function pickDuration(hours) {
     const start = startTime || '19:00'
-    setStartTime(start)
-    setEndTime(addHours(start, hours))
+    setTimes(start, addHours(start, hours))
   }
 
   const totalHours = courts.reduce((s, c) => s + (Number(c.hours) || 0), 0)
@@ -293,11 +300,11 @@ export default function NewPlayDayForm({
           </div>
           <label className="field">
             <span className="field-label">เริ่ม</span>
-            <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+            <input type="time" value={startTime} onChange={(e) => setTimes(e.target.value, endTime)} />
           </label>
           <label className="field">
             <span className="field-label">ถึง</span>
-            <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+            <input type="time" value={endTime} onChange={(e) => setTimes(startTime, e.target.value)} />
           </label>
         </div>
       </FormSection>
@@ -352,7 +359,13 @@ export default function NewPlayDayForm({
           <button
             type="button"
             className="btn-ghost"
-            onClick={() => setCourts((prev) => [...prev, { ...BLANK_COURT }])}
+            // คอร์ตใหม่ได้ชั่วโมงเท่าเวลาที่นัดไว้เลย แก้ทีหลังได้
+            onClick={() =>
+              setCourts((prev) => [
+                ...prev,
+                { name: '', hours: bookable(duration) ? String(duration) : '' },
+              ])
+            }
           >
             + เพิ่มคอร์ต
           </button>
@@ -421,7 +434,7 @@ export default function NewPlayDayForm({
                     />
                     <span>{m.name}</span>
                     <span className={`skill-chip skill-${m.skill}`}>
-                      {SKILL_LEVELS.find((s) => s.value === m.skill)?.label}
+                      {skillLabel(m.skill)}
                     </span>
                   </label>
                 ))}
@@ -521,6 +534,21 @@ export default function NewPlayDayForm({
               </option>
             ))}
           </select>
+        </label>
+
+        {/* แยกจากโหมดเพราะใช้ได้กับทั้งสองโหมด สลับกลางวันได้จากหน้ากระดาน */}
+        <label className="rest-toggle">
+          <input
+            type="checkbox"
+            checked={forceRest}
+            onChange={(e) => setForceRest(e.target.checked)}
+          />
+          <span>
+            บังคับพัก 1 เกมก่อนลงใหม่
+            <span className="rest-toggle-hint">
+              ปิดแล้วคู่จะหลากหลายกว่า แต่คนเพิ่งเล่นจบอาจได้ลงต่อเลย
+            </span>
+          </span>
         </label>
       </FormSection>
 

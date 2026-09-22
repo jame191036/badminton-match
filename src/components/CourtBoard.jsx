@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { QUEUE_MODES, skillLabel } from '../utils/pairing'
+import { QUEUE_MODES, skillLabel, winChance } from '../utils/pairing'
 import AsyncButton from './AsyncButton'
+import { mmss } from '../utils/date'
 import EditableName from './EditableName'
 
 // นาฬิกาเดินตัวเดียวใช้ร่วมกันทุกคอร์ต ดีกว่าให้แต่ละคอร์ตตั้ง interval เอง
@@ -14,13 +15,6 @@ function useNow(active) {
   }, [active])
 
   return now
-}
-
-function formatElapsed(ms) {
-  const total = Math.max(0, Math.floor(ms / 1000))
-  const mm = String(Math.floor(total / 60)).padStart(2, '0')
-  const ss = String(total % 60).padStart(2, '0')
-  return `${mm}:${ss}`
 }
 
 function TeamSide({ team, label, onSubstitute }) {
@@ -52,13 +46,76 @@ function TeamSide({ team, label, onSubstitute }) {
   )
 }
 
+/**
+ * โอกาสชนะของสองฝั่งจาก rating — ให้เห็นว่าคู่นี้สูสีแค่ไหนก่อนตี
+ * ไม่โชว์เลข rating ของใคร โชว์แค่เปอร์เซ็นต์ (ก๊วนที่ปิดการเห็น rating ก็ยังใช้ได้)
+ */
+function OddsBadge({ teamA, teamB }) {
+  const a = Math.round(winChance(teamA, teamB) * 100)
+  return (
+    <span className="odds" title="โอกาสชนะที่ระบบคาดไว้ ฝั่ง A – ฝั่ง B">
+      {a}–{100 - a}
+    </span>
+  )
+}
+
+const toScore = (v) => (v === '' ? null : Number(v))
+
+/**
+ * จบเกม พร้อมช่องแต้มสองฝั่ง — ไม่บังคับกรอก เว้นว่างทั้งคู่ก็จบได้
+ * (บางก๊วนไม่จดแต้ม ถ้าบังคับจะกลายเป็นขั้นตอนเกินที่ทุกคนกดข้าม)
+ * ถ้ากรอก ต้องครบสองฝั่งและไม่เสมอ — DB ตรวจและตอบเป็นข้อความไทย
+ */
+function FinishForm({ onFinish }) {
+  const [a, setA] = useState('')
+  const [b, setB] = useState('')
+
+  return (
+    <div className="finish-form">
+      <div className="score-inputs">
+        <input
+          type="number"
+          min="0"
+          max="99"
+          inputMode="numeric"
+          placeholder="A"
+          aria-label="แต้มฝั่ง A"
+          value={a}
+          onChange={(e) => setA(e.target.value)}
+        />
+        <span className="score-dash">–</span>
+        <input
+          type="number"
+          min="0"
+          max="99"
+          inputMode="numeric"
+          placeholder="B"
+          aria-label="แต้มฝั่ง B"
+          value={b}
+          onChange={(e) => setB(e.target.value)}
+        />
+      </div>
+      <AsyncButton
+        className="btn-primary btn-finish"
+        busyLabel="กำลังจบเกม..."
+        onClick={() => onFinish(toScore(a), toScore(b))}
+      >
+        {a === '' && b === '' ? 'จบเกม → คืนคิว' : 'บันทึกแต้ม + จบเกม'}
+      </AsyncButton>
+    </div>
+  )
+}
+
 export default function CourtBoard({
   courts,
   readOnly = false,
+  // วันเล่นเริ่มแล้วหรือยัง — ก่อนเริ่ม DB ไม่ยอมให้จับคู่ ปุ่มจึงต้องกดไม่ได้ตั้งแต่แรก
+  live,
   waitingCount,
   onAssign,
   onStart,
   onSubstitute,
+  onFill,
   onCancel,
   onFinish,
   onAddCourt,
@@ -66,6 +123,8 @@ export default function CourtBoard({
   onRenameCourt,
   queueMode,
   onChangeQueueMode,
+  forceRest,
+  onChangeForceRest,
 }) {
   const hasRunning = courts.some((c) => c.match?.status === 'playing')
   const now = useNow(hasRunning)
@@ -106,6 +165,23 @@ export default function CourtBoard({
         <span className="queue-mode-hint">
           {QUEUE_MODES.find((m) => m.value === queueMode)?.hint}
         </span>
+
+        {/* สวิตช์แยกจากโหมด เพราะใช้ได้กับทั้งสองโหมด
+            ปิดแล้วมีคนให้เลือกจับคู่มากขึ้น คู่จึงหลากหลายกว่า แต่คนไม่ได้พัก */}
+        <label className="rest-toggle">
+          <input
+            type="checkbox"
+            checked={forceRest}
+            disabled={readOnly}
+            onChange={(e) => onChangeForceRest(e.target.checked)}
+          />
+          <span>
+            บังคับพัก 1 เกมก่อนลงใหม่
+            <span className="rest-toggle-hint">
+              {forceRest ? 'คนเพิ่งเล่นจบต้องรออีกเกม' : 'ใครเล่นน้อยสุดได้ลงเลย ไม่ต้องรอ'}
+            </span>
+          </span>
+        </label>
       </div>
 
       <div className="court-grid">
@@ -133,7 +209,7 @@ export default function CourtBoard({
                   <span className={`court-status mono ${isPending ? 'is-pending' : 'is-playing'}`}>
                     {isPending
                       ? 'รอเริ่มเกม'
-                      : formatElapsed(now - (match.startedAt ?? now))}
+                      : mmss((now - (match.startedAt ?? now)) / 1000)}
                   </span>
                 )}
               </div>
@@ -145,15 +221,18 @@ export default function CourtBoard({
                       team={match.teamA}
                       label="ฝั่ง A"
                       onSubstitute={
-                        isPending && !readOnly ? (pid) => onSubstitute(court.id, pid) : null
+                        isPending && !readOnly ? (pid) => onSubstitute(match.id, pid) : null
                       }
                     />
-                    <div className="vs mono">VS</div>
+                    <div className="vs mono">
+                      VS
+                      {playerCount === 4 && <OddsBadge teamA={match.teamA} teamB={match.teamB} />}
+                    </div>
                     <TeamSide
                       team={match.teamB}
                       label="ฝั่ง B"
                       onSubstitute={
-                        isPending && !readOnly ? (pid) => onSubstitute(court.id, pid) : null
+                        isPending && !readOnly ? (pid) => onSubstitute(match.id, pid) : null
                       }
                     />
                   </div>
@@ -162,23 +241,34 @@ export default function CourtBoard({
                     <>
                       {playerCount < 4 && (
                         <p className="court-warn">
-                          ขาดอีก {4 - playerCount} คน — ไม่มีใครรอคิวอยู่ ให้คนที่พักกลับเข้าคิว
-                          เพิ่มผู้เล่นใหม่ หรือยกเลิกไปก่อน
+                          ขาดอีก {4 - playerCount} คน —{' '}
+                          {waitingCount > 0
+                            ? 'มีคนรอคิวอยู่แล้ว กด “เติมจากคิว” ได้เลย'
+                            : 'ไม่มีใครรอคิวอยู่ ให้คนที่พักกลับเข้าคิว เพิ่มผู้เล่นใหม่ หรือยกเลิกไปก่อน'}
                         </p>
                       )}
                       {!readOnly && (
                         <div className="court-actions">
+                          {playerCount < 4 && waitingCount > 0 && (
+                            <AsyncButton
+                              className="btn-primary"
+                              busyLabel="กำลังเติม..."
+                              onClick={() => onFill(match.id)}
+                            >
+                              เติมจากคิว
+                            </AsyncButton>
+                          )}
                           <AsyncButton
-                            className="btn-primary"
+                            className={playerCount < 4 ? 'btn-ghost' : 'btn-primary'}
                             busyLabel="กำลังเริ่ม..."
-                            onClick={() => onStart(court.id)}
+                            onClick={() => onStart(match.id)}
                             disabled={playerCount < 4}
                           >
                             เริ่มเกม
                           </AsyncButton>
                           <AsyncButton
                             className="btn-ghost btn-danger"
-                            onClick={() => onCancel(court.id)}
+                            onClick={() => onCancel(match.id)}
                           >
                             ยกเลิก
                           </AsyncButton>
@@ -187,13 +277,7 @@ export default function CourtBoard({
                     </>
                   ) : (
                     !readOnly && (
-                      <AsyncButton
-                        className="btn-primary btn-finish"
-                        busyLabel="กำลังจบเกม..."
-                        onClick={() => onFinish(court.id)}
-                      >
-                        จบเกม → คืนคิว
-                      </AsyncButton>
+                      <FinishForm onFinish={(a, b) => onFinish(match.id, a, b)} />
                     )
                   )}
                 </>
@@ -205,8 +289,14 @@ export default function CourtBoard({
                       className="btn-primary"
                       busyLabel="กำลังจับคู่..."
                       onClick={() => onAssign(court.id)}
-                      disabled={waitingCount < 4}
-                      title={waitingCount < 4 ? 'ต้องมีผู้เล่นรอคิวอย่างน้อย 4 คน' : ''}
+                      disabled={!live || waitingCount < 4}
+                      title={
+                        !live
+                          ? 'กดเริ่มวันเล่นก่อน'
+                          : waitingCount < 4
+                            ? 'ต้องมีผู้เล่นรอคิวอย่างน้อย 4 คน'
+                            : ''
+                      }
                     >
                       จับคู่ลงคอร์ต
                     </AsyncButton>

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, X } from 'lucide-react'
 import { usePlayDay } from '../hooks/usePlayDay'
 import { useBadmintonData } from '../hooks/useBadmintonData'
 import PlayerForm from '../components/PlayerForm'
@@ -10,10 +10,13 @@ import CourtBoard from '../components/CourtBoard'
 import MatchHistory from '../components/MatchHistory'
 import SessionStats from '../components/SessionStats'
 import BillingPanel from '../components/BillingPanel'
+import PaymentPanel from '../components/PaymentPanel'
+import { useClubOutstanding } from '../hooks/useClubOutstanding'
+import { computeBilling, isPayer } from '../utils/billing'
 import { SkeletonCourts, SkeletonHead, SkeletonQueue } from '../components/Skeleton'
 import { useConfirm } from '../hooks/useConfirm'
 import AsyncButton from '../components/AsyncButton'
-import { hoursBetween } from '../utils/date'
+import { clock, formatMinutes, hoursBetween, thaiDate } from '../utils/date'
 
 // count คืน null = ไม่ต้องโชว์ตัวเลขบนแท็บ
 // แท็บผู้เล่นโชว์ "จำนวนคนที่รอคิว" ไม่ใช่จำนวนคนทั้งหมด เพราะตอนอยู่แท็บคอร์ต
@@ -22,6 +25,8 @@ const DAY_TABS = [
   { id: 'board', label: 'คอร์ต', count: (c) => (c.playing > 0 ? c.playing : null) },
   { id: 'players', label: 'ผู้เล่น', count: (c) => (c.waiting > 0 ? c.waiting : null) },
   { id: 'billing', label: 'หารเงิน', count: () => null },
+  // จำนวนคนที่ยังไม่จ่าย — เห็นจากทุกแท็บว่ายังเก็บเงินไม่ครบ
+  { id: 'collect', label: 'เก็บเงิน', count: (c) => (c.unpaid > 0 ? c.unpaid : null) },
   { id: 'stats', label: 'สถิติ', count: () => null },
   { id: 'history', label: 'ประวัติ', count: (c) => (c.games > 0 ? c.games : null) },
 ]
@@ -33,25 +38,11 @@ const STATUS_LABEL = {
   cancelled: 'ยกเลิกแล้ว',
 }
 
-function formatThaiDate(value) {
-  if (!value) return ''
-  return new Date(`${value}T00:00:00`).toLocaleDateString('th-TH', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  })
-}
-
-const clock = (t) => (t ? String(t).slice(0, 5) : '')
+const formatThaiDate = (v) =>
+  thaiDate(v, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 
 /** 3 → "3 ชม." / 2.5 → "2 ชม. 30 นาที" */
-function formatHoursLabel(hours) {
-  const whole = Math.floor(hours)
-  const minutes = Math.round((hours - whole) * 60)
-  if (whole === 0) return `${minutes} นาที`
-  return minutes === 0 ? `${whole} ชม.` : `${whole} ชม. ${minutes} นาที`
-}
+const formatHoursLabel = (hours) => formatMinutes(Math.round(hours * 60))
 
 export default function PlayDayPage() {
   const { clubId, sessionId } = useParams()
@@ -60,6 +51,7 @@ export default function PlayDayPage() {
     day,
     canEdit,
     ownerId,
+    clubInfo,
     billing,
     loading: dayLoading,
     error: dayError,
@@ -67,12 +59,14 @@ export default function PlayDayPage() {
     clearSaveError,
     updateBilling,
     updateQueueMode,
+    updateForceRest,
     startDay,
     closeDay,
     refetch: refetchDay,
   } = usePlayDay(sessionId)
 
   const isLive = day?.status === 'playing'
+  const outstanding = useClubOutstanding(clubId)
   const {
     players,
     courts,
@@ -94,9 +88,11 @@ export default function PlayDayPage() {
     assignCourt,
     startMatch,
     substitutePlayer,
+    fillMatch,
     cancelMatch,
     finishMatch,
-  } = useBadmintonData(sessionId, day?.queueMode ?? 'sequential')
+    setMatchScore,
+  } = useBadmintonData(sessionId, day?.queueMode ?? 'sequential', day?.forceRest ?? true)
 
   const [headError, setHeadError] = useState('')
   const [tab, setTab] = useState('board')
@@ -113,9 +109,27 @@ export default function PlayDayPage() {
    *   หารเงิน — BillingPanel คำนวณสดจากราคาปัจจุบัน ซึ่งอาจไม่ตรงกับยอดที่
    *             freeze ไว้ ยอดจริงแสดงอยู่ในกล่อง "ยอดที่ล็อกไว้" ด้านบนแล้ว
    */
+  // วันที่จองไว้ยังไม่มีอะไรให้เก็บเงิน — แท็บเก็บเงินโผล่ตั้งแต่เริ่มเล่น และยังอยู่หลังจบวัน
+  // เพราะส่วนใหญ่โอนกันหลังเลิกเล่น
   const tabs = isClosed
     ? DAY_TABS.filter((t) => t.id !== 'board' && t.id !== 'billing')
-    : DAY_TABS
+    : day?.status === 'planned'
+      ? DAY_TABS.filter((t) => t.id !== 'collect')
+      : DAY_TABS
+
+  // เก็บเงิน: วันที่จบแล้วใช้ยอดที่ freeze ไว้ ไม่งั้นใช้ยอดสดสูตรเดียวกับแท็บหารเงิน
+  const payers = players.filter(isPayer)
+  const live = computeBilling({ players, courts, billing })
+  const perPerson = isClosed ? day.finals.perPerson : live.perPerson
+  const payTotal = isClosed ? day.finals.totalFee : live.total
+  // ยอดค้างจากวันก่อน ๆ ของคนที่มาวันนี้ — ไม่นับวันนี้เอง
+  const priorByMember = new Map(
+    outstanding.groups
+      .filter((g) => g.memberId)
+      .map((g) => [g.memberId, { ...g, days: g.days.filter((d) => d.sessionId !== sessionId) }])
+      .filter(([, g]) => g.days.length > 0)
+      .map(([id, g]) => [id, { ...g, total: g.days.reduce((a, d) => a + d.amount, 0) }]),
+  )
 
   // เลือกแท็บที่ยังมีอยู่จริง — ค่าตั้งต้น 'board' ใช้กับวันที่จบแล้วไม่ได้
   const activeTab = tabs.some((t) => t.id === tab) ? tab : tabs[0].id
@@ -130,6 +144,7 @@ export default function PlayDayPage() {
     // ใช้ยอดจาก view ไม่ใช่ history.length เพราะ history ดึงมาแค่ 30 แถวล่าสุด
     // ตัวเลขบนแท็บจะได้ไม่ค้างที่ 30 ทั้งที่เล่นไปมากกว่านั้น
     games: summary?.finishedGames ?? 0,
+    unpaid: payers.filter((p) => !p.paidAt).length,
   }
 
   async function run(fn) {
@@ -289,9 +304,7 @@ export default function PlayDayPage() {
                 clearSaveError()
               }}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <path d="M6 6l12 12M18 6 6 18" />
-              </svg>
+              <X aria-hidden="true" />
             </button>
           </div>
         )}
@@ -307,6 +320,12 @@ export default function PlayDayPage() {
               <li>
                 <span>คนละ</span>
                 <strong>{day.finals.perPerson.toLocaleString('th-TH')} บาท</strong>
+              </li>
+              {/* ตัวหารไม่เท่ากับจำนวนผู้เล่นเสมอไป (มีคนไม่ร่วมจ่ายได้)
+                  ถ้าไม่บอก 9 คน × 130 จะไม่เท่ายอดรวมแล้วดูเหมือนคิดผิด */}
+              <li>
+                <span>หารกัน</span>
+                <strong>{day.finals.payerCount} คน</strong>
               </li>
               <li>
                 <span>ผู้เล่น</span>
@@ -387,15 +406,19 @@ export default function PlayDayPage() {
                 <CourtBoard
                   courts={courts}
                   readOnly={!canEdit}
+                  live={isLive}
                   waitingCount={waitingCount}
                   queueMode={day.queueMode}
                   onChangeQueueMode={updateQueueMode}
+                  forceRest={day.forceRest}
+                  onChangeForceRest={updateForceRest}
                   onAddCourt={addCourt}
                   onRemoveCourt={removeCourt}
                   onRenameCourt={renameCourt}
                   onAssign={assignCourt}
                   onStart={startMatch}
                   onSubstitute={substitutePlayer}
+                  onFill={fillMatch}
                   onCancel={cancelMatch}
                   onFinish={finishMatch}
                 />
@@ -450,10 +473,36 @@ export default function PlayDayPage() {
             </section>
           )}
 
+          {activeTab === 'collect' && (
+            <section className="panel">
+              <h2>เก็บเงิน</h2>
+              <PaymentPanel
+                payers={payers}
+                perPerson={perPerson}
+                total={payTotal}
+                live={!isClosed}
+                // ติ๊กจ่ายได้แม้วันจบแล้ว (โอนกันทีหลัง) — viewer แก้ไม่ได้
+                readOnly={!canEdit}
+                prior={priorByMember}
+                club={clubInfo}
+                dateLabel={thaiDate(day.playDate, { weekday: 'short', day: 'numeric', month: 'short' })}
+                onSetPaid={async (ids, paid) => {
+                  await outstanding.setPaid(ids, paid)
+                  await refreshBoard()
+                }}
+              />
+            </section>
+          )}
+
           {activeTab === 'history' && (
             <section className="panel">
               <h2>ประวัติการแข่งขัน</h2>
-              <MatchHistory history={history} />
+              <MatchHistory
+                history={history}
+                summary={summary}
+                // แก้แต้มย้อนหลังได้เฉพาะระหว่างวัน — DB บังคับอีกชั้น (set_match_score)
+                onSetScore={canEdit && isLive ? setMatchScore : undefined}
+              />
             </section>
           )}
         </>

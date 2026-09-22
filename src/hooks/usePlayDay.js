@@ -4,7 +4,6 @@ import { supabase } from '../lib/supabaseClient'
 function mapDay(row) {
   return {
     id: row.id,
-    clubId: row.club_id,
     playDate: row.play_date,
     startTime: row.start_time,
     endTime: row.end_time,
@@ -16,15 +15,14 @@ function mapDay(row) {
     shuttleBrandId: row.shuttle_brand_id,
     shuttleModelId: row.shuttle_model_id,
     queueMode: row.queue_mode ?? 'sequential',
-    closedAt: row.closed_at,
+    // บังคับพัก 1 เกมก่อนลงใหม่ — แยกจากโหมดคิว ใช้ได้กับทั้งสองโหมด
+    forceRest: row.force_rest ?? true,
     finals: {
       totalFee: Number(row.final_total_fee ?? 0),
       perPerson: Number(row.final_per_person ?? 0),
       payerCount: row.final_payer_count ?? 0,
       playerCount: row.final_player_count ?? 0,
       gameCount: row.final_game_count ?? 0,
-      playMinutes: row.final_play_minutes ?? 0,
-      totalHours: Number(row.final_total_hours ?? 0),
     },
   }
 }
@@ -37,6 +35,8 @@ export function usePlayDay(sessionId) {
   const [day, setDay] = useState(null)
   const [role, setRole] = useState(null)
   const [ownerId, setOwnerId] = useState(null)
+  // ชื่อก๊วนและพร้อมเพย์ — ใช้ในข้อความสรุปยอดและ QR ของแท็บเก็บเงิน
+  const [clubInfo, setClubInfo] = useState(null)
   const [billing, setBilling] = useState({ hourlyRate: '', shuttlePrice: '', shuttleCount: '' })
   // คอร์ตที่จองของวันนี้ — หน้าแก้ไขต้องใช้ ส่วนกระดานใช้ชุดของ useBadmintonData
   const [courts, setCourts] = useState([])
@@ -86,7 +86,7 @@ export function usePlayDay(sessionId) {
         // viewer เห็นปุ่มแล้วกดไม่ได้ จะดูเหมือนแอปพัง ทั้งที่ RLS ทำงานถูก
         const { data: clubRow } = await supabase
           .from('v_my_clubs')
-          .select('role, owner_id')
+          .select('role, owner_id, name, promptpay_id, promptpay_name')
           .eq('id', data.club_id)
           .maybeSingle()
 
@@ -94,6 +94,11 @@ export function usePlayDay(sessionId) {
         setRole(clubRow?.role ?? null)
         // ข้อมูลหลักผูกกับบัญชีเจ้าของก๊วน ไม่ใช่คนที่ล็อกอินอยู่
         setOwnerId(clubRow?.owner_id ?? null)
+        setClubInfo(
+          clubRow
+            ? { name: clubRow.name, promptpayId: clubRow.promptpay_id, promptpayName: clubRow.promptpay_name }
+            : null,
+        )
       }
       setLoading(false)
     }
@@ -192,22 +197,35 @@ export function usePlayDay(sessionId) {
     return () => supabase.removeChannel(channel)
   }, [sessionId])
 
-  const updateQueueMode = useCallback(
-    async (mode) => {
-      setDay((prev) => (prev ? { ...prev, queueMode: mode } : prev))
+  /**
+   * เปลี่ยนการตั้งค่าการจับคู่ — โชว์บนจอทันทีแล้วค่อยยิงขึ้น server
+   *
+   * patch เป็นชื่อคอลัมน์จริง (snake_case) ส่วน local เป็นชื่อในรูปแบบที่
+   * component ใช้ (camelCase) เขียนรวมกันเพราะสองปุ่มนี้ต่างกันแค่ชื่อคอลัมน์
+   */
+  const updateQueueSetting = useCallback(
+    async (patch, local) => {
+      setDay((prev) => (prev ? { ...prev, ...local } : prev))
       if (!sessionId) return
-      const { error: err } = await supabase
-        .from('sessions')
-        .update({ queue_mode: mode })
-        .eq('id', sessionId)
+      const { error: err } = await supabase.from('sessions').update(patch).eq('id', sessionId)
       if (err) {
         console.error(err)
-        setSaveError(`เปลี่ยนโหมดคิวไม่สำเร็จ: ${err.message}`)
+        setSaveError(`เปลี่ยนวิธีจับคู่ไม่สำเร็จ: ${err.message}`)
       } else {
         setSaveError('')
       }
     },
     [sessionId],
+  )
+
+  const updateQueueMode = useCallback(
+    (mode) => updateQueueSetting({ queue_mode: mode }, { queueMode: mode }),
+    [updateQueueSetting],
+  )
+
+  const updateForceRest = useCallback(
+    (on) => updateQueueSetting({ force_rest: on }, { forceRest: on }),
+    [updateQueueSetting],
   )
 
   const startDay = useCallback(async () => {
@@ -233,6 +251,7 @@ export function usePlayDay(sessionId) {
     courts,
     role,
     ownerId,
+    clubInfo,
     // viewer ดูได้อย่างเดียว — ตรงกับ can_edit_session ฝั่ง DB
     canEdit: role === 'owner' || role === 'editor',
     billing,
@@ -242,6 +261,7 @@ export function usePlayDay(sessionId) {
     clearSaveError,
     updateBilling,
     updateQueueMode,
+    updateForceRest,
     startDay,
     closeDay,
     refetch,

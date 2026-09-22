@@ -1,21 +1,22 @@
-// นาที:วินาที แบบเดียวกับนาฬิกาที่เดินอยู่บนคอร์ต (ดู CourtBoard)
-// เกมแบดส่วนใหญ่ 10-25 นาที การบอกเป็นวินาทีด้วยจึงยังอ่านง่าย
-function formatDuration(seconds) {
-  if (seconds == null) return null
-  const total = Math.round(seconds)
-  const mm = Math.floor(total / 60)
-  const ss = String(total % 60).padStart(2, '0')
-  return `${mm}:${ss}`
-}
+import { mmss } from '../utils/date'
+import EditableName from './EditableName'
 
-export default function MatchHistory({ history }) {
+// นาที:วินาที แบบเดียวกับนาฬิกาที่เดินอยู่บนคอร์ต
+// เกมแบดส่วนใหญ่ 10-25 นาที การบอกเป็นวินาทีด้วยจึงยังอ่านง่าย
+
+/**
+ * history คือ 30 เกมล่าสุดเท่านั้น (ดู useBadmintonData) ยอดรวมจึงเอามาจาก
+ * summary ของทั้งวัน ไม่ใช่นับจากลิสต์ ไม่งั้นเล่นเกิน 30 เกมแล้วตัวเลขค้างที่ 30
+ */
+// onSetScore ไม่ส่งมา = แก้แต้มไม่ได้ (ผู้ชม หรือวันที่จบแล้ว)
+export default function MatchHistory({ history, summary, onSetScore }) {
   if (history.length === 0) {
     return <p className="empty-state small">ยังไม่มีประวัติการแข่งขัน</p>
   }
 
-  const withDuration = history.filter((h) => h.durationSeconds != null)
-  const totalSeconds = withDuration.reduce((sum, h) => sum + h.durationSeconds, 0)
-  const avgSeconds = withDuration.length > 0 ? totalSeconds / withDuration.length : null
+  const games = summary?.finishedGames ?? history.length
+  const totalMinutes = summary?.totalPlayMinutes ?? 0
+  const avgSeconds = games > 0 && totalMinutes > 0 ? (totalMinutes * 60) / games : null
 
   return (
     <>
@@ -23,20 +24,27 @@ export default function MatchHistory({ history }) {
         <p className="history-summary mono">
           {/* ไม่ต่อคำว่า "นาที" ท้าย mm:ss เพราะ "14:32 นาที" อ่านแล้วเข้าใจว่า
               14 นาที 32 อะไรไม่รู้ — เวลารวมเป็นนาทีเต็มจึงต่อหน่วยได้ */}
-          {history.length} เกม · เฉลี่ยเกมละ {formatDuration(avgSeconds)} (นาที:วินาที) · รวม{' '}
-          {Math.round(totalSeconds / 60)} นาที
+          {games} เกม · เฉลี่ยเกมละ {mmss(avgSeconds)} (นาที:วินาที) · รวม{' '}
+          {totalMinutes} นาที
         </p>
+      )}
+      {games > history.length && (
+        <p className="panel-hint">แสดง {history.length} เกมล่าสุด</p>
       )}
 
       <div className="history-item history-head" aria-hidden="true">
         <span className="history-time">เวลา</span>
         <span className="history-court">คอร์ต</span>
         <span className="history-teams">ผู้เล่น</span>
+        <span className="history-score">แต้ม</span>
         <span className="history-duration">ใช้เวลา</span>
       </div>
 
       <ul className="history-list">
-        {history.map((h) => (
+        {history.map((h) => {
+          const scored = h.scoreA != null
+          const aWon = scored && h.scoreA > h.scoreB
+          return (
           <li key={h.id} className="history-item">
             <span className="history-time mono">
               {h.startTime && `${h.startTime}–`}
@@ -44,15 +52,33 @@ export default function MatchHistory({ history }) {
             </span>
             <span className="history-court">{h.courtName}</span>
             <span className="history-teams">
-              {h.teamA.join(' + ')} <span className="vs-inline">vs</span> {h.teamB.join(' + ')}
+              <span className={scored && aWon ? 'team-won' : ''}>{h.teamA.join(' + ')}</span>{' '}
+              <span className="vs-inline">vs</span>{' '}
+              <span className={scored && !aWon ? 'team-won' : ''}>{h.teamB.join(' + ')}</span>
+            </span>
+            <span className="history-score mono">
+              <EditableName
+                label="แต้ม"
+                readOnly={!onSetScore}
+                fields={[
+                  { key: 'a', value: scored ? String(h.scoreA) : '', placeholder: 'A' },
+                  { key: 'b', value: scored ? String(h.scoreB) : '', placeholder: 'B' },
+                ]}
+                onSave={({ a, b }) =>
+                  onSetScore(h.id, a == null ? null : Number(a), b == null ? null : Number(b))
+                }
+              >
+                {scored ? `${h.scoreA}–${h.scoreB}` : '—'}
+              </EditableName>
             </span>
             {h.durationSeconds != null && (
               <span className="history-duration mono" title="เวลาที่ใช้เล่นเกมนี้">
-                {formatDuration(h.durationSeconds)}
+                {mmss(h.durationSeconds)}
               </span>
             )}
           </li>
-        ))}
+          )
+        })}
       </ul>
     </>
   )

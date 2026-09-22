@@ -1,25 +1,14 @@
 import { useState } from 'react'
-import { Link, useOutletContext } from 'react-router-dom'
-import { useClubs } from '../hooks/useClubs'
+import { Link, useNavigate, useOutletContext } from 'react-router-dom'
+import { ROLE_LABEL, useClubs } from '../hooks/useClubs'
 import { SkeletonList } from '../components/Skeleton'
+import { thaiDate } from '../utils/date'
 
-const ROLE_LABEL = {
-  owner: 'เจ้าของ',
-  editor: 'จัดก๊วนได้',
-  viewer: 'ดูอย่างเดียว',
-}
-
-function formatThaiDate(value) {
-  if (!value) return null
-  return new Date(`${value}T00:00:00`).toLocaleDateString('th-TH', {
-    day: 'numeric',
-    month: 'short',
-    year: '2-digit',
-  })
-}
+const formatThaiDate = (v) => thaiDate(v, { day: 'numeric', month: 'short', year: '2-digit' })
 
 export default function ClubListPage() {
   const { user } = useOutletContext()
+  const navigate = useNavigate()
   const { clubs, loading, error, createClub } = useClubs(user?.id)
   const [name, setName] = useState('')
   const [adding, setAdding] = useState(false)
@@ -31,12 +20,10 @@ export default function ClubListPage() {
     setFormError('')
     setAdding(true)
     try {
-      await createClub(name)
-      setName('')
-      setShowForm(false)
+      // เข้าก๊วนที่เพิ่งสร้างเลย สิ่งถัดไปที่ต้องทำคือสร้างวันเล่นในนั้น
+      navigate(`/club/${await createClub(name)}`)
     } catch (err) {
       setFormError(err.message)
-    } finally {
       setAdding(false)
     }
   }

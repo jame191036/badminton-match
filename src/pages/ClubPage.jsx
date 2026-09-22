@@ -4,8 +4,10 @@ import { useClubDays } from '../hooks/useClubDays'
 import { usePastDays } from '../hooks/usePastDays'
 import ClubSharePanel from '../components/ClubSharePanel'
 import ClubSettingsPanel from '../components/ClubSettingsPanel'
+import ClubRanking from '../components/ClubRanking'
+import OutstandingPanel from '../components/OutstandingPanel'
 import { SkeletonHead, SkeletonList } from '../components/Skeleton'
-import { todayISO } from '../utils/date'
+import { clock, thaiDate, todayISO } from '../utils/date'
 import { useConfirm } from '../hooks/useConfirm'
 import AsyncButton from '../components/AsyncButton'
 
@@ -16,20 +18,12 @@ const STATUS_LABEL = {
   cancelled: 'ยกเลิก',
 }
 
-function formatThaiDate(value) {
-  if (!value) return ''
-  return new Date(`${value}T00:00:00`).toLocaleDateString('th-TH', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    year: '2-digit',
-  })
-}
+const formatThaiDate = (v) =>
+  thaiDate(v, { weekday: 'short', day: 'numeric', month: 'short', year: '2-digit' })
 
 function formatTimeRange(start, end) {
   if (!start && !end) return null
-  const trim = (t) => (t ? String(t).slice(0, 5) : '')
-  return `${trim(start)}${end ? `–${trim(end)}` : ''}`
+  return `${clock(start)}${end ? `–${clock(end)}` : ''}`
 }
 
 export default function ClubPage() {
@@ -43,6 +37,8 @@ export default function ClubPage() {
     startDay,
     cancelDay,
     renameClub,
+    setShowRating,
+    setPromptPay,
     deleteClub,
   } = useClubDays(clubId)
   // อ่านนาฬิกาครั้งเดียวตอน mount — ไม่อ่านระหว่าง render
@@ -126,6 +122,8 @@ export default function ClubPage() {
         <div className="tab-bar" role="tablist">
           {[
             { id: 'days', label: 'วันเล่น' },
+            { id: 'ranking', label: 'อันดับ' },
+            { id: 'outstanding', label: 'ค้างจ่าย' },
             { id: 'share', label: 'คนในก๊วน' },
             { id: 'settings', label: 'ตั้งค่า' },
           ].map((t) => (
@@ -144,7 +142,11 @@ export default function ClubPage() {
 
         {actionError && <p className="auth-error">{actionError}</p>}
 
-        {tab === 'share' ? (
+        {tab === 'outstanding' ? (
+          <OutstandingPanel clubId={clubId} club={club} canEdit={canEdit} />
+        ) : tab === 'ranking' ? (
+          <ClubRanking clubId={clubId} showRating={club.showRating || canEdit} />
+        ) : tab === 'share' ? (
           <ClubSharePanel clubId={clubId} isOwner={club.role === 'owner'} />
         ) : tab === 'settings' ? (
           <ClubSettingsPanel
@@ -152,6 +154,8 @@ export default function ClubPage() {
             // total_days นับทุกสถานะ รวม playing กับ cancelled ที่ cascade ก็ลบไปด้วย
             stats={{ dayCount: club.totalDays }}
             onRename={renameClub}
+            onToggleRating={setShowRating}
+            onSavePromptPay={setPromptPay}
             onDelete={async () => {
               await deleteClub()
               navigate('/')
@@ -199,6 +203,7 @@ export default function ClubPage() {
                           day={day}
                           clubId={clubId}
                           canEdit={canEdit}
+                          canStart={day.playDate <= today}
                           overdue
                           onStart={() => run(() => startDay(day.id))}
                           onCancel={() => run(() => cancelDay(day.id))}
@@ -219,6 +224,7 @@ export default function ClubPage() {
                         day={day}
                         clubId={clubId}
                         canEdit={canEdit}
+                        canStart={day.playDate <= today}
                         onStart={() => run(() => startDay(day.id))}
                         onCancel={() => run(() => cancelDay(day.id))}
                       />
@@ -314,7 +320,8 @@ function PastDaysTable({ clubId }) {
   )
 }
 
-function DayRow({ day, clubId, canEdit, overdue = false, onStart, onCancel }) {
+// canStart = ถึงวันแล้ว — วันในอนาคตไม่มีปุ่ม "เริ่มวันนี้" (ยังเข้าไปเริ่มจากหน้าวันเล่นได้)
+function DayRow({ day, clubId, canEdit, canStart, overdue = false, onStart, onCancel }) {
   const confirm = useConfirm()
   const time = formatTimeRange(day.startTime, day.endTime)
 
@@ -341,9 +348,11 @@ function DayRow({ day, clubId, canEdit, overdue = false, onStart, onCancel }) {
 
       {canEdit && day.status === 'planned' && (
         <div className="day-row-actions">
-          <AsyncButton className="btn-primary" busyLabel="กำลังเริ่ม..." onClick={onStart}>
-            เริ่มวันนี้
-          </AsyncButton>
+          {canStart && (
+            <AsyncButton className="btn-primary" busyLabel="กำลังเริ่ม..." onClick={onStart}>
+              เริ่มวันนี้
+            </AsyncButton>
+          )}
           <AsyncButton
             className="btn-ghost btn-danger"
             onClick={async () => {

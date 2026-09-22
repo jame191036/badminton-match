@@ -27,7 +27,8 @@ create extension if not exists "pgcrypto"; -- สำหรับ gen_random_uuid
 drop view if exists
   v_waiting_queue, v_court_board, v_match_history, v_billing_summary,
   v_session_player_stats, v_session_summary, v_pair_history,
-  v_club_days, v_member_stats, v_my_clubs, v_session_archive cascade;
+  v_club_days, v_member_stats, v_my_clubs, v_club_ranking, v_club_outstanding,
+  v_session_archive cascade;
 
 drop table if exists
   match_players, matches, courts, players, sessions,
@@ -85,6 +86,12 @@ create table clubs (
   name       text not null check (char_length(trim(name)) > 0),
   note       text,
   active     boolean not null default true,
+  -- ให้ทุกคนในก๊วนเห็นตัวเลข rating ไหม (คนจัดก๊วนเห็นเสมอ)
+  show_rating boolean not null default true,
+  -- พร้อมเพย์ของคนเก็บเงิน ไว้สร้าง QR — เบอร์ 10 หลัก / เลขบัตร 13 หลัก / e-wallet 15 หลัก
+  -- สมาชิกทุกคนในก๊วนเห็น (ต้องเห็นถึงจะโอนได้)
+  promptpay_id   text check (promptpay_id ~ '^([0-9]{10}|[0-9]{13}|[0-9]{15})$'),
+  promptpay_name text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -127,11 +134,23 @@ create table members (
   default_skill smallint not null default 2 check (default_skill between 1 and 3),
   note          text,
   active        boolean not null default true,
+  -- ความเก่งที่เรียนรู้จากแต้มจริง (แบบ Elo) — null = ยังไม่มีเกมที่จดแต้ม
+  -- ให้ใช้ค่าจากระดับมือแทน (skill_rating) ปรับระดับมือแล้วค่าตามไปด้วยจนกว่าจะเริ่มเล่นจริง
+  rating        numeric(7, 2),
+  rated_games   int not null default 0,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
 
 create index idx_members_owner on members(owner_id);
+
+-- ระดับมือ 1–3 -> rating ตั้งต้น (100 แต้ม ≈ ห่างกันหนึ่งระดับมือ)
+-- ต้องตรงกับ skillRating() ใน src/utils/pairing.js
+create or replace function skill_rating(p_skill int)
+returns numeric
+language sql
+immutable
+as $$ select 800 + 100 * p_skill::numeric $$;
 
 create unique index uq_members_owner_name
   on members(owner_id, lower(trim(name)));
@@ -259,6 +278,9 @@ create table sessions (
   -- วิธีเลือกผู้เล่นลงคอร์ต — logic จริงอยู่ใน src/utils/pairing.js
   queue_mode         text not null default 'sequential'
                        check (queue_mode in ('sequential', 'rotate')),
+  -- บังคับพัก 1 เกมก่อนลงใหม่ — เป็นสวิตช์แยกเพราะใช้ได้กับทั้งสองโหมด
+  -- ปิดแล้วมีคนให้เลือกจับคู่มากขึ้น คู่จึงหลากหลายกว่า แต่คนไม่ได้พัก
+  force_rest         boolean not null default true,
 
   closed_at          timestamptz,
   -- ยอดที่ freeze ไว้ตอนจบวัน (null จนกว่าจะกดจบ)
@@ -308,6 +330,9 @@ create table players (
                  check (status in ('waiting', 'resting', 'playing', 'absent')),
   games_played int not null default 0 check (games_played >= 0),
   paying       boolean not null default true,
+  -- เวลาที่จ่ายเงินแล้ว (null = ยังไม่จ่าย) ติ๊กได้ทั้งระหว่างวันและหลังจบวัน
+  -- เพราะส่วนใหญ่โอนกันหลังเลิกเล่น
+  paid_at      timestamptz,
   -- ลำดับคิว: ใช้เลขรัน ไม่ใช่ timestamp เพื่อกันค่าชนกันเวลาเรียง
   queue_seq    bigserial,
   created_at   timestamptz not null default now(),
@@ -360,7 +385,13 @@ create table matches (
                check (status in ('pending', 'playing', 'done')),
   started_at timestamptz,    -- null ระหว่าง pending
   ended_at   timestamptz,
-  created_at timestamptz not null default now()
+  -- แต้มไม่บังคับ: ไม่กรอกก็จบเกมได้ เกมนั้นแค่ไม่ถูกนับแพ้/ชนะ
+  -- แบดไม่มีเสมอ แต้มเท่ากันจึงไม่ยอม (ไม่งั้นตัดสินผู้ชนะไม่ได้)
+  score_a    smallint check (score_a between 0 and 99),
+  score_b    smallint check (score_b between 0 and 99),
+  created_at timestamptz not null default now(),
+  constraint matches_score_both check ((score_a is null) = (score_b is null)),
+  constraint matches_score_no_tie check (score_a is null or score_a <> score_b)
 );
 
 create index idx_matches_session on matches(session_id);
@@ -384,6 +415,9 @@ create table match_players (
   player_name text not null,
   skill       smallint not null check (skill between 1 and 3),
   team        text not null check (team in ('A', 'B')),
+  -- rating ที่เกมนี้ให้/หักคนนี้ (null = ไม่ได้คิด: ไม่จดแต้ม แขก หรือเกมสั้นผิดปกติ)
+  -- เก็บไว้เพื่อถอนออกตอนแก้แต้มย้อนหลัง
+  rating_delta numeric(6, 2),
   created_at  timestamptz not null default now()
 );
 
@@ -523,29 +557,6 @@ create trigger trg_shuttle_models_lock_brand
 -- Views
 -- ============================================================
 
--- คิวรอลงคอร์ต: เรียงตาม games_played แล้ว queue_seq (เหมือน pickNextMatch)
-create or replace view v_waiting_queue as
-select *
-from players
-where status = 'waiting'
-order by session_id, games_played, queue_seq;
-
--- สถานะคอร์ต + แมตช์ที่ยังไม่จบ (ถ้ามี)
-create or replace view v_court_board as
-select
-  c.id         as court_id,
-  c.session_id,
-  c.name       as court_name,
-  c.sort_order,
-  c.hours,
-  m.id         as match_id,
-  m.status     as match_status,
-  m.started_at
-from courts c
-left join matches m
-  on m.court_id = c.id and m.ended_at is null
-order by c.session_id, c.sort_order;
-
 -- ประวัติการแข่งขัน พร้อมชื่อผู้เล่นสองทีม
 create or replace view v_match_history as
 select
@@ -554,6 +565,8 @@ select
   m.court_name,
   m.started_at,
   m.ended_at,
+  m.score_a,
+  m.score_b,
   array_agg(mp.player_name) filter (where mp.team = 'A') as team_a_names,
   array_agg(mp.player_name) filter (where mp.team = 'B') as team_b_names
 from matches m
@@ -607,7 +620,18 @@ select
   p.status,
   p.paying,
   count(m.id)                                                           as games,
-  coalesce(sum(extract(epoch from (m.ended_at - m.started_at))), 0) / 60 as minutes
+  coalesce(sum(extract(epoch from (m.ended_at - m.started_at))), 0) / 60 as minutes,
+  -- แพ้/ชนะนับเฉพาะเกมที่กรอกแต้ม (ฝั่งเราแต้มมากกว่า = ชนะ)
+  count(m.id) filter (where m.score_a is not null and (mp.team = 'A') =  (m.score_a > m.score_b)) as wins,
+  count(m.id) filter (where m.score_a is not null and (mp.team = 'A') <> (m.score_a > m.score_b)) as losses,
+  coalesce(sum(case when mp.team = 'A' then m.score_a - m.score_b else m.score_b - m.score_a end)
+           filter (where m.score_a is not null), 0) as point_diff,
+  -- พักครบหนึ่งเกมแล้วหรือยัง: หลังจบเกมล่าสุดของเรา ต้องมีเกมอื่นที่จับคู่
+  -- หลังจากนั้นและเล่นจบไปแล้วหนึ่งเกม (ยังไม่เคยเล่น = พักครบ)
+  max(m.ended_at) is null or exists (
+    select 1 from matches m2
+    where m2.session_id = p.session_id and m2.status = 'done' and m2.created_at > max(m.ended_at)
+  ) as rested
 from players p
 left join match_players mp on mp.player_id = p.id
 left join matches m
@@ -697,6 +721,48 @@ left join players p on p.member_id = mb.id and p.status <> 'absent'
 left join sessions s on s.id = p.session_id and s.status = 'done'
 group by mb.id;
 
+-- อันดับแพ้/ชนะของก๊วน รวมทุกวันเล่น นับเฉพาะเกมที่กรอกแต้ม
+-- ผูกกับสมาชิก (member_id) ข้ามวันได้ แขกขาจรไม่มี member จึงไม่ติดอันดับ
+-- ชื่อใช้ชื่อปัจจุบันในรายชื่อหลัก เปลี่ยนชื่อแล้วอันดับยังเป็นคนเดิม
+create or replace view v_club_ranking as
+select
+  s.club_id,
+  mb.id   as member_id,
+  mb.name,
+  coalesce(mb.rating, skill_rating(mb.default_skill)) as rating,
+  mb.rated_games,
+  count(*)                                                        as games,
+  count(*) filter (where (mp.team = 'A') =  (m.score_a > m.score_b)) as wins,
+  count(*) filter (where (mp.team = 'A') <> (m.score_a > m.score_b)) as losses,
+  sum(case when mp.team = 'A' then m.score_a - m.score_b else m.score_b - m.score_a end) as point_diff
+from match_players mp
+join matches m  on m.id = mp.match_id and m.status = 'done' and m.score_a is not null
+join sessions s on s.id = m.session_id
+join players p  on p.id = mp.player_id
+join members mb on mb.id = p.member_id
+group by s.club_id, mb.id, mb.name, mb.rating, mb.default_skill, mb.rated_games;
+
+-- ยอดค้างจ่าย: หนึ่งแถวต่อคนต่อวันที่ยังไม่จ่าย ของวันที่จบแล้วเท่านั้น
+-- (วันที่ยังเล่นอยู่ยอดยังเปลี่ยนได้ จึงไม่นับเป็นหนี้)
+-- ใช้ยอดที่ freeze ไว้ (final_per_person) ไม่คำนวณใหม่ — แบบเดียวกับ v_club_days
+-- ฝั่งแอปรวมเป็นรายคนเอง: สมาชิกรวมด้วย member_id ข้ามวัน แขกแยกเป็นรายวัน
+create or replace view v_club_outstanding as
+select
+  s.club_id,
+  s.id               as session_id,
+  s.play_date,
+  p.id               as player_id,
+  p.member_id,
+  p.name,
+  s.final_per_person as amount
+from players p
+join sessions s on s.id = p.session_id
+where s.status = 'done'
+  and p.paying
+  and p.status <> 'absent'
+  and p.paid_at is null
+  and s.final_per_person > 0;
+
 -- ก๊วนที่ฉันเข้าถึงได้ พร้อมบทบาทและวันเล่นล่าสุด/ถัดไป
 create or replace view v_my_clubs as
 select
@@ -715,7 +781,10 @@ select
   (select s.id from sessions s where s.club_id = c.id and s.status = 'playing' limit 1) as playing_session_id,
   (select max(s.play_date) from sessions s where s.club_id = c.id and s.status = 'done') as last_played_on,
   (select min(s.play_date) from sessions s
-    where s.club_id = c.id and s.status = 'planned' and s.play_date >= current_date) as next_play_date
+    where s.club_id = c.id and s.status = 'planned' and s.play_date >= current_date) as next_play_date,
+  c.show_rating,
+  c.promptpay_id,
+  c.promptpay_name
 from clubs c
 join club_access a on a.club_id = c.id and a.user_id = auth.uid();
 
@@ -726,8 +795,6 @@ join club_access a on a.club_id = c.id and a.user_id = auth.uid();
 -- view รันด้วยสิทธิ์เจ้าของ view เป็นค่าเริ่มต้น ซึ่งข้าม RLS
 -- เปิด security_invoker ให้ใช้สิทธิ์ของคนเรียกแทน RLS จึงมีผลจริง
 -- *** view ใหม่ทุกตัวต้องตั้งค่านี้เสมอ ***
-alter view v_waiting_queue        set (security_invoker = on);
-alter view v_court_board          set (security_invoker = on);
 alter view v_match_history        set (security_invoker = on);
 alter view v_billing_summary      set (security_invoker = on);
 alter view v_session_player_stats set (security_invoker = on);
@@ -735,6 +802,8 @@ alter view v_session_summary      set (security_invoker = on);
 alter view v_pair_history         set (security_invoker = on);
 alter view v_club_days            set (security_invoker = on);
 alter view v_member_stats         set (security_invoker = on);
+alter view v_club_ranking         set (security_invoker = on);
+alter view v_club_outstanding     set (security_invoker = on);
 alter view v_my_clubs             set (security_invoker = on);
 
 

@@ -17,8 +17,8 @@ export default function PlayerForm({ onAdd }) {
   async function handleSubmit() {
     const trimmed = name.trim()
     if (!trimmed) return
-    await onAdd(trimmed, skill, !guest)
-    setName('')
+    // เพิ่มไม่สำเร็จ (เช่นชื่อซ้ำ) ให้ชื่อค้างไว้แก้ต่อ ไม่ต้องพิมพ์ใหม่
+    if (await onAdd(trimmed, skill, !guest)) setName('')
   }
 
   return (

@@ -3,8 +3,7 @@ import { useClubDays } from '../hooks/useClubDays'
 import { usePlayDay } from '../hooks/usePlayDay'
 import NewPlayDayForm from '../components/NewPlayDayForm'
 import { SkeletonHead } from '../components/Skeleton'
-
-const clock = (t) => (t ? String(t).slice(0, 5) : '')
+import { clock } from '../utils/date'
 
 /**
  * แก้ไขวันเล่นที่จองไว้ — ใช้ฟอร์มตัวเดียวกับหน้าสร้าง ต่างกันที่ส่ง initial
@@ -72,6 +71,7 @@ export default function EditPlayDayPage() {
           shuttlePrice: billing.shuttlePrice,
           shuttleCount: billing.shuttleCount,
           queueMode: day.queueMode,
+          forceRest: day.forceRest,
           courts: courts.map((c) => ({ name: c.name, hours: String(c.hours ?? '') })),
         }}
         onSubmit={async (payload) => {

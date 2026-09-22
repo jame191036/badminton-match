@@ -175,6 +175,7 @@ begin
     'hourly_rate', v_last.hourly_rate,
     'shuttle_price', v_last.shuttle_price,
     'queue_mode', v_last.queue_mode,
+    'force_rest', v_last.force_rest,
     'courts', (
       select coalesce(json_agg(json_build_object('name', c.name, 'hours', c.hours)
                                order by c.sort_order), '[]'::json)
@@ -212,7 +213,8 @@ create or replace function create_play_day(
   p_queue_mode text default 'sequential',
   p_member_ids uuid[] default '{}',
   p_courts jsonb default null,
-  p_note text default null
+  p_note text default null,
+  p_force_rest boolean default true
 )
 returns uuid
 language plpgsql
@@ -270,7 +272,7 @@ begin
     club_id, venue_id, venue_name,
     shuttle_brand_id, shuttle_model_id, shuttle_brand_name,
     play_date, start_time, end_time, status,
-    hourly_rate, shuttle_price, shuttle_count, queue_mode, note
+    hourly_rate, shuttle_price, shuttle_count, queue_mode, force_rest, note
   )
   values (
     p_club_id, p_venue_id, v_venue_name,
@@ -282,6 +284,7 @@ begin
     coalesce(p_shuttle_price, 0),
     coalesce(p_shuttle_count, 0),
     coalesce(p_queue_mode, 'sequential'),
+    coalesce(p_force_rest, true),
     nullif(trim(coalesce(p_note, '')), '')
   )
   returning id into v_session_id;
@@ -333,7 +336,8 @@ create or replace function update_play_day(
   p_shuttle_count int default 0,
   p_queue_mode text default 'sequential',
   p_courts jsonb default null,
-  p_note text default null
+  p_note text default null,
+  p_force_rest boolean default true
 )
 returns void
 language plpgsql
@@ -404,6 +408,7 @@ begin
       shuttle_price      = coalesce(p_shuttle_price, 0),
       shuttle_count      = coalesce(p_shuttle_count, 0),
       queue_mode         = coalesce(p_queue_mode, 'sequential'),
+      force_rest         = coalesce(p_force_rest, true),
       note               = nullif(trim(coalesce(p_note, '')), '')
   where id = p_session_id;
 
@@ -566,6 +571,7 @@ declare
   v_member_id uuid;
   v_player_id uuid;
   v_name text := trim(coalesce(p_name, ''));
+  v_skill smallint := p_skill;
 begin
   if not can_edit_session(p_session_id) then
     raise exception 'ไม่พบวันเล่นนี้ หรือไม่มีสิทธิ์แก้ไข';
@@ -586,23 +592,31 @@ begin
   where s.id = p_session_id;
 
   -- แขกขาจร (p_save_to_master = false) ไม่ถูกบันทึกเข้ารายชื่อ master
+  --
+  -- ชื่อที่มีอยู่แล้ว: ใช้ชื่อและระดับมือของสมาชิกคนนั้น ไม่เขียนทับ master
+  -- (ช่องระดับมือหน้างานตั้งค่าเริ่มไว้ที่ "มือกลาง" ถ้าเขียนทับ พิมพ์ชื่อคน
+  --  มือเก่งเข้าวันเล่นทีเดียว ข้อมูลหลักของเขาก็กลายเป็นมือกลางเงียบ ๆ)
   if p_save_to_master then
     insert into members (owner_id, name, default_skill)
     values (v_owner_id, v_name, p_skill)
-    on conflict (owner_id, lower(trim(name)))
-      do update set default_skill = excluded.default_skill
-    returning id into v_member_id;
+    on conflict (owner_id, lower(trim(name))) do nothing;
 
-    if exists (
-      select 1 from players
-      where session_id = p_session_id and member_id = v_member_id
-    ) then
-      raise exception '% อยู่ในวันเล่นนี้แล้ว', v_name;
-    end if;
+    select id, name, default_skill into v_member_id, v_name, v_skill
+    from members
+    where owner_id = v_owner_id and lower(trim(name)) = lower(v_name);
+  end if;
+
+  -- ชื่อซ้ำในวันเดียวกันแยกคนไม่ออกบนกระดาน — กันทั้งสมาชิกและแขก
+  if exists (
+    select 1 from players
+    where session_id = p_session_id
+      and (member_id = v_member_id or lower(trim(name)) = lower(v_name))
+  ) then
+    raise exception '% อยู่ในวันเล่นนี้แล้ว', v_name;
   end if;
 
   insert into players (session_id, member_id, name, skill)
-  values (p_session_id, v_member_id, v_name, p_skill)
+  values (p_session_id, v_member_id, v_name, v_skill)
   returning id into v_player_id;
 
   return v_player_id;
@@ -707,12 +721,23 @@ begin
     raise exception 'ต้องกดเริ่มวันเล่นก่อนถึงจะจัดคนลงคอร์ตได้';
   end if;
 
-  if exists (
-    select 1 from players
+  if coalesce(array_length(p_team_a, 1), 0) <> 2
+     or coalesce(array_length(p_team_b, 1), 0) <> 2
+     or (select count(distinct x) from unnest(p_team_a || p_team_b) x) <> 4 then
+    raise exception 'ต้องจับคู่ 2 ต่อ 2 และเป็นคนละคนกันทั้ง 4 คน';
+  end if;
+
+  -- ล็อกแถวก่อนเช็ค: สองเครื่อง (หรือกดสองคอร์ตติดกัน) จับคนชุดเดียวกัน
+  -- คำสั่งหลังจะรอจนคำสั่งแรกจบ แล้วเห็นว่าคนเหล่านี้ไม่ได้ 'waiting' แล้ว
+  perform 1 from players where id = any(p_team_a || p_team_b) for update;
+
+  if (
+    select count(*) from players
     where id = any(p_team_a || p_team_b)
-      and (session_id <> v_session_id or status = 'absent')
-  ) then
-    raise exception 'มีผู้เล่นที่ไม่ได้อยู่ในวันเล่นนี้ หรือถูกทำเครื่องหมายว่าไม่มา';
+      and session_id = v_session_id
+      and status = 'waiting'
+  ) <> 4 then
+    raise exception 'มีผู้เล่นที่ไม่ได้รอคิวอยู่แล้ว (อาจถูกจัดลงคอร์ตอื่นไปก่อน) — ลองจับคู่ใหม่อีกครั้ง';
   end if;
 
   insert into matches (session_id, court_id, court_name, status, started_at)
@@ -753,7 +778,8 @@ begin
     raise exception 'ไม่พบเกมนี้ หรือไม่มีสิทธิ์แก้ไข';
   end if;
 
-  select count(*) into v_player_count from match_players where match_id = p_match_id;
+  -- player_id เป็น null ได้ถ้าผู้เล่นถูกลบทิ้ง แถวนั้นไม่ใช่คนจริงในคอร์ต
+  select count(player_id) into v_player_count from match_players where match_id = p_match_id;
   if v_player_count <> 4 then
     raise exception 'ต้องมีผู้เล่นครบ 4 คนถึงจะเริ่มเกมได้ (ตอนนี้ % คน)', v_player_count;
   end if;
@@ -855,11 +881,196 @@ end;
 $$;
 
 -- ------------------------------------------------------------
+-- เติมที่ว่างในเกมที่ยังไม่เริ่ม ด้วยคนแรกในคิว (เกณฑ์เดียวกับ substitute_player)
+-- ที่ว่างเกิดจากสลับตัวตอนไม่มีใครรอคิว — พอมีคนกลับเข้าคิวแล้ว
+-- ต้องมีทางเติมให้ครบ ไม่งั้นทางเดียวคือยกเลิกทั้งเกม
+-- คืนจำนวนคนที่เติมเข้าไป (0 = คิวว่าง)
+-- ------------------------------------------------------------
+create or replace function fill_match(p_match_id uuid)
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_session_id uuid;
+  v_team text;
+  v_next uuid;
+  v_added int := 0;
+begin
+  select session_id into v_session_id
+  from matches where id = p_match_id and status = 'pending'
+  for update;
+
+  if v_session_id is null or not can_edit_session(v_session_id) then
+    raise exception 'ไม่พบเกมนี้ ไม่มีสิทธิ์แก้ไข หรือเกมเริ่มไปแล้ว';
+  end if;
+
+  foreach v_team in array array['A', 'B'] loop
+    while (
+      select count(player_id) from match_players
+      where match_id = p_match_id and team = v_team
+    ) < 2 loop
+      select p.id into v_next
+      from players p
+      where p.session_id = v_session_id and p.status = 'waiting'
+      order by p.games_played, p.queue_seq
+      limit 1
+      for update skip locked;
+
+      exit when v_next is null;
+
+      insert into match_players (match_id, player_id, player_name, skill, team)
+      select p_match_id, id, name, skill, v_team from players where id = v_next;
+
+      update players set status = 'playing' where id = v_next;
+      v_added := v_added + 1;
+    end loop;
+  end loop;
+
+  return v_added;
+end;
+$$;
+
+-- ------------------------------------------------------------
+-- ตรวจแต้มก่อนบันทึก — ใช้ร่วมกันทั้งตอนจบเกมและตอนแก้แต้มย้อนหลัง
+-- ตาราง matches มี check constraint กันอยู่แล้ว ตรงนี้มีไว้ให้ได้ข้อความไทย
+-- ------------------------------------------------------------
+create or replace function assert_valid_score(p_score_a int, p_score_b int)
+returns void
+language plpgsql
+immutable
+as $$
+begin
+  if (p_score_a is null) <> (p_score_b is null) then
+    raise exception 'ใส่แต้มให้ครบทั้งสองฝั่ง หรือเว้นว่างทั้งคู่';
+  end if;
+  if p_score_a < 0 or p_score_b < 0 or p_score_a > 99 or p_score_b > 99 then
+    raise exception 'แต้มต้องอยู่ระหว่าง 0 ถึง 99';
+  end if;
+  if p_score_a = p_score_b then
+    raise exception 'แต้มเสมอกันไม่ได้ ต้องมีฝั่งที่ชนะ';
+  end if;
+end;
+$$;
+
+-- ------------------------------------------------------------
+-- rating แบบ Elo จากแต้มจริง — เรียกจาก finish_match / set_match_score เท่านั้น
+--
+--   ความแรงทีม = เฉลี่ย rating ของสองคน (แขกใช้ค่าจากระดับมือ)
+--   คาดการณ์   E_A = 1 / (1 + 10^((R_B - R_A) / 400))
+--   ผลจริง     S_A = 0.5 + 0.5 × (a - b) / max(a, b)
+--              ชนะ 21-19 ≈ 0.55 (สูสี), 21-10 ≈ 0.76, 21-0 = 1 (ขาดลอย)
+--   ปรับ      ±K × (S_A - E_A)  K = 48 ช่วง 10 เกมแรก (ยังวัดไม่นิ่ง) แล้ว 32
+--
+-- เวลาเล่นเป็นตัวช่วยยืนยันความสูสีเท่านั้น ไม่ใช่ตัวหลัก เพราะรวมเวลาเก็บลูก
+-- พักคุย และกดจบช้าไว้ด้วย:
+--   สั้นกว่า 3 นาที     -> ไม่คิด rating (น่าจะกดพลาด)
+--   ยาว ≥ 1.25 เท่าของมัธยฐานวันนั้น และแต้มห่าง ≤ 4 -> นับว่าสูสีกว่าที่แต้มบอก
+--   (ลดส่วนต่างจาก 0.5 ลงครึ่งหนึ่ง) ต้องมีเกมอื่นในวันนั้นอย่างน้อย 3 เกม
+--
+-- แขกขาจรไม่มี member จึงไม่ถูกเก็บ rating แต่ยังนับความแรงเข้าทีม
+-- ------------------------------------------------------------
+create or replace function apply_match_rating(p_match_id uuid)
+returns void
+language plpgsql
+as $$
+declare
+  v_m matches%rowtype;
+  v_ra numeric;
+  v_rb numeric;
+  v_expect numeric;
+  v_actual numeric;
+  v_minutes numeric;
+  v_median numeric;
+  v_others int;
+begin
+  select * into v_m from matches where id = p_match_id;
+  if v_m.score_a is null or v_m.started_at is null or v_m.ended_at is null then
+    return;
+  end if;
+
+  v_minutes := extract(epoch from (v_m.ended_at - v_m.started_at)) / 60;
+  if v_minutes < 3 then
+    return;
+  end if;
+
+  select
+    avg(coalesce(mb.rating, skill_rating(mp.skill))) filter (where mp.team = 'A'),
+    avg(coalesce(mb.rating, skill_rating(mp.skill))) filter (where mp.team = 'B')
+  into v_ra, v_rb
+  from match_players mp
+  left join players p  on p.id = mp.player_id
+  left join members mb on mb.id = p.member_id
+  where mp.match_id = p_match_id;
+
+  v_expect := 1 / (1 + power(10, (v_rb - v_ra) / 400));
+  v_actual := 0.5 + 0.5 * (v_m.score_a - v_m.score_b)::numeric / greatest(v_m.score_a, v_m.score_b);
+
+  select count(*), percentile_cont(0.5) within group (order by extract(epoch from (ended_at - started_at)) / 60)
+  into v_others, v_median
+  from matches
+  where session_id = v_m.session_id and id <> p_match_id and status = 'done'
+    and score_a is not null and ended_at - started_at >= interval '3 minutes';
+
+  if v_others >= 3 and v_minutes >= 1.25 * v_median and abs(v_m.score_a - v_m.score_b) <= 4 then
+    v_actual := 0.5 + (v_actual - 0.5) * 0.5;
+  end if;
+
+  update match_players mp
+  set rating_delta = round(
+        (case when mb.rated_games < 10 then 48 else 32 end)
+        * (case when mp.team = 'A' then v_actual - v_expect else v_expect - v_actual end), 2)
+  from players p
+  join members mb on mb.id = p.member_id
+  where mp.match_id = p_match_id and p.id = mp.player_id;
+
+  update members mb
+  set rating = coalesce(mb.rating, skill_rating(mb.default_skill)) + mp.rating_delta,
+      rated_games = mb.rated_games + 1
+  from match_players mp
+  join players p on p.id = mp.player_id
+  where mp.match_id = p_match_id and mp.rating_delta is not null and mb.id = p.member_id;
+end;
+$$;
+
+-- ถอน rating ที่เกมนี้เคยให้ออก ก่อนคิดใหม่ตอนแก้แต้ม
+-- (คิดใหม่จาก rating ปัจจุบัน ไม่ใช่ย้อนทั้งประวัติ — คลาดเคลื่อนเล็กน้อยถ้ามีเกม
+--  อื่นเล่นต่อไปแล้ว แต่แก้แต้มเป็นเรื่องนาน ๆ ครั้ง คุ้มกว่าคำนวณย้อนทั้งหมด)
+create or replace function revert_match_rating(p_match_id uuid)
+returns void
+language plpgsql
+as $$
+begin
+  update members mb
+  set rating = mb.rating - mp.rating_delta,
+      rated_games = greatest(mb.rated_games - 1, 0)
+  from match_players mp
+  join players p on p.id = mp.player_id
+  where mp.match_id = p_match_id and mp.rating_delta is not null and mb.id = p.member_id;
+
+  update match_players set rating_delta = null where match_id = p_match_id;
+end;
+$$;
+
+-- เรียกตรงจาก client ไม่ได้ — ไม่งั้นใครก็ปั่น rating ได้
+revoke execute on function apply_match_rating(uuid) from public, anon, authenticated;
+revoke execute on function revert_match_rating(uuid) from public, anon, authenticated;
+
+-- ------------------------------------------------------------
 -- จบเกม: ปิด match, คืนผู้เล่นเข้าคิว, +1 เกมที่เล่น, ไปต่อท้ายคิว
 -- นับเกมให้เฉพาะคนที่ยังอยู่ใน match_players ตอนจบ
 -- (คนที่ถูกสลับออกไปก่อนเริ่มจึงไม่ถูกนับ — ดู substitute_player)
+--
+-- แต้มไม่บังคับ (null ทั้งคู่ = ไม่ได้จด) เกมยังนับตามปกติ แค่ไม่เข้าตารางแพ้/ชนะ
 -- ------------------------------------------------------------
-create or replace function finish_match(p_match_id uuid)
+drop function if exists finish_match(uuid);
+
+create or replace function finish_match(
+  p_match_id uuid,
+  p_score_a int default null,
+  p_score_b int default null
+)
 returns void
 language plpgsql
 security definer
@@ -874,8 +1085,10 @@ begin
     raise exception 'ไม่พบเกมนี้ หรือไม่มีสิทธิ์แก้ไข';
   end if;
 
+  perform assert_valid_score(p_score_a, p_score_b);
+
   update matches
-  set ended_at = now(), status = 'done'
+  set ended_at = now(), status = 'done', score_a = p_score_a, score_b = p_score_b
   where id = p_match_id and status = 'playing';
 
   if not found then
@@ -890,6 +1103,37 @@ begin
     select player_id from match_players
     where match_id = p_match_id and player_id is not null
   );
+
+  perform apply_match_rating(p_match_id);
+end;
+$$;
+
+-- ------------------------------------------------------------
+-- แก้/เพิ่ม/ลบแต้มของเกมที่จบแล้ว (จดผิด หรือลืมจดตอนกดจบ)
+-- ทำได้เฉพาะวันที่ยังเล่นอยู่ — วันที่จบแล้วประวัติต้องนิ่ง (กติกาเดียวกับ rename_court)
+-- ------------------------------------------------------------
+create or replace function set_match_score(p_match_id uuid, p_score_a int, p_score_b int)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_session_id uuid;
+begin
+  select m.session_id into v_session_id
+  from matches m join sessions s on s.id = m.session_id
+  where m.id = p_match_id and m.status = 'done' and s.status = 'playing';
+
+  if v_session_id is null or not can_edit_session(v_session_id) then
+    raise exception 'แก้แต้มไม่ได้ — ต้องเป็นเกมที่จบแล้วในวันที่ยังเล่นอยู่ และต้องมีสิทธิ์จัดก๊วนนี้';
+  end if;
+
+  perform assert_valid_score(p_score_a, p_score_b);
+
+  perform revert_match_rating(p_match_id);
+  update matches set score_a = p_score_a, score_b = p_score_b where id = p_match_id;
+  perform apply_match_rating(p_match_id);
 end;
 $$;
 
@@ -984,8 +1228,8 @@ grant execute on function revoke_club_access(uuid, uuid) to authenticated;
 grant execute on function list_club_members(uuid) to authenticated;
 
 grant execute on function last_day_defaults(uuid) to authenticated;
-grant execute on function create_play_day(uuid, date, time, time, uuid, uuid, uuid, numeric, numeric, int, text, uuid[], jsonb, text) to authenticated;
-grant execute on function update_play_day(uuid, date, time, time, uuid, uuid, uuid, numeric, numeric, int, text, jsonb, text) to authenticated;
+grant execute on function create_play_day(uuid, date, time, time, uuid, uuid, uuid, numeric, numeric, int, text, uuid[], jsonb, text, boolean) to authenticated;
+grant execute on function update_play_day(uuid, date, time, time, uuid, uuid, uuid, numeric, numeric, int, text, jsonb, text, boolean) to authenticated;
 grant execute on function start_play_day(uuid) to authenticated;
 grant execute on function cancel_play_day(uuid) to authenticated;
 grant execute on function close_session(uuid) to authenticated;
@@ -998,6 +1242,8 @@ grant execute on function assign_court(uuid, uuid[], uuid[]) to authenticated;
 grant execute on function start_match(uuid) to authenticated;
 grant execute on function substitute_player(uuid, uuid) to authenticated;
 grant execute on function cancel_match(uuid) to authenticated;
-grant execute on function finish_match(uuid) to authenticated;
+grant execute on function fill_match(uuid) to authenticated;
+grant execute on function finish_match(uuid, int, int) to authenticated;
+grant execute on function set_match_score(uuid, int, int) to authenticated;
 grant execute on function remove_court(uuid) to authenticated;
 grant execute on function rename_court(uuid, text) to authenticated;

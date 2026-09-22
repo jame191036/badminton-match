@@ -1,23 +1,40 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { mapClub } from './useClubs'
+import { useLoad } from './useLoad'
 
-function mapDay(row) {
+export function mapDay(row) {
   return {
     id: row.session_id,
-    clubId: row.club_id,
     playDate: row.play_date,
     startTime: row.start_time,
     endTime: row.end_time,
     status: row.status,
     venueName: row.venue_name,
     shuttleBrandName: row.shuttle_brand_name,
-    closedAt: row.closed_at,
     totalFee: Number(row.total_fee ?? 0),
     perPerson: Number(row.per_person ?? 0),
-    totalHours: Number(row.total_hours ?? 0),
     playerCount: Number(row.player_count ?? 0),
     gameCount: Number(row.game_count ?? 0),
-    playMinutes: Number(row.play_minutes ?? 0),
+  }
+}
+
+// พารามิเตอร์ที่ create_play_day กับ update_play_day ใช้ร่วมกัน
+function dayParams(payload) {
+  return {
+    p_play_date: payload.playDate,
+    p_start_time: payload.startTime || null,
+    p_end_time: payload.endTime || null,
+    p_venue_id: payload.venueId || null,
+    p_shuttle_brand_id: payload.shuttleBrandId || null,
+    p_shuttle_model_id: payload.shuttleModelId || null,
+    p_hourly_rate: payload.hourlyRate ?? null,
+    p_shuttle_price: payload.shuttlePrice ?? null,
+    p_shuttle_count: payload.shuttleCount ?? 0,
+    p_queue_mode: payload.queueMode ?? 'rotate',
+    p_force_rest: payload.forceRest ?? true,
+    p_courts: payload.courts ?? null,
+    p_note: payload.note || null,
   }
 }
 
@@ -28,65 +45,26 @@ function mapDay(row) {
  * (ถ้าคำนวณสด พอแก้เรทค่าสนามทีหลัง ยอดของวันเก่าจะเปลี่ยนตามทั้งที่จ่ายกันไปแล้ว)
  */
 export function useClubDays(clubId) {
-  const [club, setClub] = useState(null)
-  const [days, setDays] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [reloadKey, setReloadKey] = useState(0)
-
-  const refetch = useCallback(() => setReloadKey((k) => k + 1), [])
-
-  useEffect(() => {
-    if (!clubId) return
-    let alive = true
-
-    async function load() {
-      const [clubRes, daysRes] = await Promise.all([
-        supabase.from('v_my_clubs').select('*').eq('id', clubId).maybeSingle(),
-        // เอาเฉพาะวันที่ยังต้องจัดการ — ประวัติที่จบแล้วโหลดแยกแบบแบ่งหน้า
-        // (usePastDays) เพราะมันสะสมไปเรื่อย ๆ ไม่มีวันหยุด
-        supabase
-          .from('v_club_days')
-          .select('*')
-          .eq('club_id', clubId)
-          .in('status', ['planned', 'playing']),
-      ])
-
-      if (!alive) return
-
-      if (clubRes.error || daysRes.error) {
-        setError((clubRes.error ?? daysRes.error).message)
-      } else {
-        setError('')
-        setClub(
-          clubRes.data
-            ? {
-                id: clubRes.data.id,
-                ownerId: clubRes.data.owner_id,
-                name: clubRes.data.name,
-                note: clubRes.data.note,
-                role: clubRes.data.role,
-                isMine: clubRes.data.is_mine,
-                playingSessionId: clubRes.data.playing_session_id,
-                // นับจาก view ไม่ได้นับจากแถวที่โหลดมา เพราะประวัติไม่ได้โหลดครบ
-                doneDays: clubRes.data.done_days ?? 0,
-                plannedDays: clubRes.data.planned_days ?? 0,
-                cancelledDays: clubRes.data.cancelled_days ?? 0,
-                // รวมทุกสถานะ รวม playing กับ cancelled ที่สองตัวบนไม่ได้นับ
-                totalDays: clubRes.data.total_days ?? 0,
-              }
-            : null,
-        )
-        setDays((daysRes.data ?? []).map(mapDay))
-      }
-      setLoading(false)
+  const fetcher = useCallback(async () => {
+    if (!clubId) return null
+    const [clubRes, daysRes] = await Promise.all([
+      supabase.from('v_my_clubs').select('*').eq('id', clubId).maybeSingle(),
+      // เอาเฉพาะวันที่ยังต้องจัดการ — ประวัติที่จบแล้วโหลดแยกแบบแบ่งหน้า
+      // (usePastDays) เพราะมันสะสมไปเรื่อย ๆ ไม่มีวันหยุด
+      supabase
+        .from('v_club_days')
+        .select('*')
+        .eq('club_id', clubId)
+        .in('status', ['planned', 'playing']),
+    ])
+    return {
+      error: clubRes.error ?? daysRes.error,
+      data: { club: clubRes.data, days: daysRes.data ?? [] },
     }
-
-    load()
-    return () => {
-      alive = false
-    }
-  }, [clubId, reloadKey])
+  }, [clubId])
+  const { data, loading, error, refetch } = useLoad(fetcher)
+  const club = data?.club ? mapClub(data.club) : null
+  const days = (data?.days ?? []).map(mapDay)
 
   /**
    * ฟังความเปลี่ยนแปลงของวันเล่นในก๊วนนี้จากเครื่องอื่น
@@ -123,19 +101,8 @@ export function useClubDays(clubId) {
     async (payload) => {
       const { data, error: err } = await supabase.rpc('create_play_day', {
         p_club_id: clubId,
-        p_play_date: payload.playDate,
-        p_start_time: payload.startTime || null,
-        p_end_time: payload.endTime || null,
-        p_venue_id: payload.venueId || null,
-        p_shuttle_brand_id: payload.shuttleBrandId || null,
-        p_shuttle_model_id: payload.shuttleModelId || null,
-        p_hourly_rate: payload.hourlyRate ?? null,
-        p_shuttle_price: payload.shuttlePrice ?? null,
-        p_shuttle_count: payload.shuttleCount ?? 0,
-        p_queue_mode: payload.queueMode ?? 'sequential',
+        ...dayParams(payload),
         p_member_ids: payload.memberIds ?? [],
-        p_courts: payload.courts ?? null,
-        p_note: payload.note || null,
       })
       if (err) throw new Error(err.message)
       refetch()
@@ -146,20 +113,9 @@ export function useClubDays(clubId) {
 
   const updateDay = useCallback(
     async (sessionId, payload) => {
-      const { error: err } = await supabase.rpc("update_play_day", {
+      const { error: err } = await supabase.rpc('update_play_day', {
         p_session_id: sessionId,
-        p_play_date: payload.playDate,
-        p_start_time: payload.startTime || null,
-        p_end_time: payload.endTime || null,
-        p_venue_id: payload.venueId || null,
-        p_shuttle_brand_id: payload.shuttleBrandId || null,
-        p_shuttle_model_id: payload.shuttleModelId || null,
-        p_hourly_rate: payload.hourlyRate ?? null,
-        p_shuttle_price: payload.shuttlePrice ?? null,
-        p_shuttle_count: payload.shuttleCount ?? 0,
-        p_queue_mode: payload.queueMode ?? "sequential",
-        p_courts: payload.courts ?? null,
-        p_note: payload.note || null,
+        ...dayParams(payload),
       })
       if (err) throw new Error(err.message)
       refetch()
@@ -199,6 +155,33 @@ export function useClubDays(clubId) {
 
   // ลบก๊วน = cascade ลบวันเล่น ผู้เล่น เกม และยอดเงินทั้งหมดของก๊วนนั้น
   // RLS ยอมเฉพาะเจ้าของ (policy "owner deletes club")
+  // เปิด/ปิดให้สมาชิกเห็นตัวเลข rating (RLS ยอมเฉพาะเจ้าของ)
+  const setShowRating = useCallback(
+    async (show) => {
+      const { error: err } = await supabase.from('clubs').update({ show_rating: show }).eq('id', clubId)
+      if (err) throw new Error(err.message)
+      refetch()
+    },
+    [clubId, refetch],
+  )
+
+  // พร้อมเพย์ของคนเก็บเงิน (RLS ยอมเฉพาะเจ้าของ) — ว่าง = ลบ
+  const setPromptPay = useCallback(
+    async (id, name) => {
+      const { error: err } = await supabase
+        .from('clubs')
+        .update({ promptpay_id: id || null, promptpay_name: name?.trim() || null })
+        .eq('id', clubId)
+      if (err) {
+        // check constraint ของเลขพร้อมเพย์ — ข้อความ Postgres เป็นอังกฤษ แปลให้
+        if (err.code === '23514') throw new Error('เลขพร้อมเพย์ต้องเป็นเบอร์มือถือ 10 หลัก เลขบัตร 13 หลัก หรือ e-wallet 15 หลัก')
+        throw new Error(err.message)
+      }
+      refetch()
+    },
+    [clubId, refetch],
+  )
+
   const deleteClub = useCallback(async () => {
     const { error: err } = await supabase.from('clubs').delete().eq('id', clubId)
     if (err) throw new Error(err.message)
@@ -216,6 +199,8 @@ export function useClubDays(clubId) {
     startDay,
     cancelDay,
     renameClub,
+    setShowRating,
+    setPromptPay,
     deleteClub,
   }
 }

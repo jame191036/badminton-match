@@ -8,7 +8,7 @@ import EditableName from '../components/EditableName'
 import SearchBox from '../components/SearchBox'
 import { SkeletonList } from '../components/Skeleton'
 import { useConfirm } from '../hooks/useConfirm'
-import { SKILL_LEVELS } from '../utils/pairing'
+import { SKILL_LEVELS, skillLabel } from '../utils/pairing'
 import AsyncButton from '../components/AsyncButton'
 
 const TABS = [
@@ -223,7 +223,7 @@ function MembersTab({ userId, canEdit, canDelete }) {
                   {m.note && <span className="master-note">{m.note}</span>}
                 </EditableName>
                 <span className={`skill-chip skill-${m.skill}`}>
-                  {SKILL_LEVELS.find((s) => s.value === m.skill)?.label}
+                  {skillLabel(m.skill)}
                 </span>
               </div>
               <div className="master-row-meta mono">
@@ -280,28 +280,10 @@ function MembersTab({ userId, canEdit, canDelete }) {
 function VenuesTab({ userId, canEdit, canDelete }) {
   const confirm = useConfirm()
   const { items, loading, error, add, update, remove } = useMasterList('venues', userId)
-  const [name, setName] = useState('')
-  const [note, setNote] = useState('')
   const [query, setQuery] = useState('')
   const [formError, setFormError] = useState('')
-  const [busy, setBusy] = useState(false)
 
   const shown = filterByQuery(items, query)
-
-  async function handleAdd(e) {
-    e.preventDefault()
-    setFormError('')
-    setBusy(true)
-    try {
-      await add({ name: name.trim(), note: note.trim() || null })
-      setName('')
-      setNote('')
-    } catch (err) {
-      setFormError(err.message)
-    } finally {
-      setBusy(false)
-    }
-  }
 
   return (
     <>
@@ -312,24 +294,12 @@ function VenuesTab({ userId, canEdit, canDelete }) {
       </p>
 
       {canEdit && (
-        <form className="player-form" onSubmit={handleAdd}>
-          <input
-            type="text"
-            placeholder="ชื่อสนาม"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-          />
-          <input
-            type="text"
-            placeholder="หมายเหตุ เช่น ซอยลาดพร้าว 15 (ไม่บังคับ)"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-          <button className="btn-primary" type="submit" disabled={busy || !name.trim()}>
-            เพิ่มสนาม
-          </button>
-        </form>
+        <NameNoteForm
+          namePlaceholder="ชื่อสนาม"
+          notePlaceholder="หมายเหตุ เช่น ซอยลาดพร้าว 15 (ไม่บังคับ)"
+          submitLabel="เพิ่มสนาม"
+          onAdd={add}
+        />
       )}
 
       <MasterError message={formError || error} />
@@ -398,31 +368,12 @@ function VenuesTab({ userId, canEdit, canDelete }) {
 function ShuttlesTab({ userId, canEdit, canDelete }) {
   const { items, loading, error, add, update, remove } = useMasterList('shuttle_brands', userId)
   const models = useShuttleModels(items.map((b) => b.id))
-  const [name, setName] = useState('')
-  const [note, setNote] = useState('')
   const [query, setQuery] = useState('')
-  const [formError, setFormError] = useState('')
-  const [busy, setBusy] = useState(false)
 
   // ค้นเจอทั้งจากชื่อยี่ห้อและชื่อรุ่นที่อยู่ข้างใน — พิมพ์ "Classic" ต้องเจอ RSL
   const shown = filterByQuery(items, query, (b) =>
     models.byBrand(b.id).map((m) => `${m.name} ${m.note ?? ''}`).join(' '),
   )
-
-  async function handleAdd(e) {
-    e.preventDefault()
-    setFormError('')
-    setBusy(true)
-    try {
-      await add({ name: name.trim(), note: note.trim() || null })
-      setName('')
-      setNote('')
-    } catch (err) {
-      setFormError(err.message)
-    } finally {
-      setBusy(false)
-    }
-  }
 
   return (
     <>
@@ -434,27 +385,15 @@ function ShuttlesTab({ userId, canEdit, canDelete }) {
       </p>
 
       {canEdit && (
-        <form className="player-form" onSubmit={handleAdd}>
-          <input
-            type="text"
-            placeholder="ยี่ห้อ เช่น RSL"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-          />
-          <input
-            type="text"
-            placeholder="หมายเหตุ (ไม่บังคับ)"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-          <button className="btn-primary" type="submit" disabled={busy || !name.trim()}>
-            เพิ่มยี่ห้อ
-          </button>
-        </form>
+        <NameNoteForm
+          namePlaceholder="ยี่ห้อ เช่น RSL"
+          notePlaceholder="หมายเหตุ (ไม่บังคับ)"
+          submitLabel="เพิ่มยี่ห้อ"
+          onAdd={add}
+        />
       )}
 
-      <MasterError message={formError || error || models.error} />
+      <MasterError message={error || models.error} />
 
       {items.length > 0 && (
         <SearchBox
@@ -505,25 +444,7 @@ function BrandRow({
   canDelete,
 }) {
   const confirm = useConfirm()
-  const [modelName, setModelName] = useState('')
-  const [modelNote, setModelNote] = useState('')
   const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  async function handleAddModel(e) {
-    e.preventDefault()
-    setError('')
-    setBusy(true)
-    try {
-      await onAddModel({ name: modelName.trim(), note: modelNote.trim() || null })
-      setModelName('')
-      setModelNote('')
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setBusy(false)
-    }
-  }
 
   return (
     <li className="brand-card">
@@ -604,28 +525,72 @@ function BrandRow({
       )}
 
       {canEdit && (
-        <form className="player-form model-form" onSubmit={handleAddModel}>
-          <input
-            type="text"
-            placeholder={`เพิ่มรุ่นของ ${brand.name} เช่น Classic`}
-            value={modelName}
-            onChange={(e) => setModelName(e.target.value)}
-            required
-          />
-          <input
-            type="text"
-            placeholder="หมายเหตุ เช่น ลูกเร็ว 77 (ไม่บังคับ)"
-            value={modelNote}
-            onChange={(e) => setModelNote(e.target.value)}
-          />
-          <button className="btn-ghost" type="submit" disabled={busy || !modelName.trim()}>
-            + เพิ่มรุ่น
-          </button>
-        </form>
+        <NameNoteForm
+          className="player-form model-form"
+          buttonClass="btn-ghost"
+          namePlaceholder={`เพิ่มรุ่นของ ${brand.name} เช่น Classic`}
+          notePlaceholder="หมายเหตุ เช่น ลูกเร็ว 77 (ไม่บังคับ)"
+          submitLabel="+ เพิ่มรุ่น"
+          onAdd={onAddModel}
+        />
       )}
 
       <MasterError message={error} />
     </li>
+  )
+}
+
+/** ฟอร์มเพิ่มแถว ชื่อ + หมายเหตุ — ใช้กับสนาม ยี่ห้อ และรุ่นลูกแบด */
+function NameNoteForm({
+  namePlaceholder,
+  notePlaceholder,
+  submitLabel,
+  onAdd,
+  className = 'player-form',
+  buttonClass = 'btn-primary',
+}) {
+  const [name, setName] = useState('')
+  const [note, setNote] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function handleAdd(e) {
+    e.preventDefault()
+    setError('')
+    setBusy(true)
+    try {
+      await onAdd({ name: name.trim(), note: note.trim() || null })
+      setName('')
+      setNote('')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <form className={className} onSubmit={handleAdd}>
+        <input
+          type="text"
+          placeholder={namePlaceholder}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          required
+        />
+        <input
+          type="text"
+          placeholder={notePlaceholder}
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
+        <button className={buttonClass} type="submit" disabled={busy || !name.trim()}>
+          {submitLabel}
+        </button>
+      </form>
+      <MasterError message={error} />
+    </>
   )
 }
 

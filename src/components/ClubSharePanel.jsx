@@ -1,66 +1,27 @@
-import { useCallback, useEffect, useState } from 'react'
-import { supabase } from '../lib/supabaseClient'
+import { useState } from 'react'
 import { SkeletonList } from './Skeleton'
 import { useConfirm } from '../hooks/useConfirm'
+import { useClubMembers } from '../hooks/useClubMembers'
+import { ROLE_LABEL } from '../hooks/useClubs'
 import AsyncButton from './AsyncButton'
 
-const ROLE_LABEL = {
-  owner: 'เจ้าของ',
-  editor: 'จัดก๊วนได้',
-  viewer: 'ดูอย่างเดียว',
-}
-
-/**
- * รายชื่อคนที่เข้าถึงก๊วนนี้ได้
- * ต้องอ่านผ่าน RPC ไม่ใช่ view เพราะอีเมลอยู่ใน auth.users
- * ซึ่ง role authenticated อ่านตรงๆ ไม่ได้
- */
+/** รายชื่อคนที่เข้าถึงก๊วนนี้ได้ และฟอร์มแชร์ (เฉพาะเจ้าของ) */
 export default function ClubSharePanel({ clubId, isOwner }) {
   const confirm = useConfirm()
-  const [rows, setRows] = useState([])
-  const [loading, setLoading] = useState(true)
+  const { members: rows, loading, error: loadError, share, revoke } = useClubMembers(clubId)
+  // error ของปุ่มแชร์/ถอนสิทธิ์ แยกจาก error ตอนโหลดรายชื่อ
   const [error, setError] = useState('')
   const [email, setEmail] = useState('')
   const [role, setRole] = useState('viewer')
   const [busy, setBusy] = useState(false)
-  const [reloadKey, setReloadKey] = useState(0)
-
-  const refetch = useCallback(() => setReloadKey((k) => k + 1), [])
-
-  useEffect(() => {
-    if (!clubId) return
-    let alive = true
-
-    async function load() {
-      const { data, error: err } = await supabase.rpc('list_club_members', { p_club_id: clubId })
-      if (!alive) return
-      if (err) setError(err.message)
-      else {
-        setRows(data ?? [])
-        setError('')
-      }
-      setLoading(false)
-    }
-
-    load()
-    return () => {
-      alive = false
-    }
-  }, [clubId, reloadKey])
 
   async function handleShare(e) {
     e.preventDefault()
     setError('')
     setBusy(true)
     try {
-      const { error: err } = await supabase.rpc('grant_club_access', {
-        p_club_id: clubId,
-        p_email: email,
-        p_role: role,
-      })
-      if (err) throw new Error(err.message)
+      await share(email, role)
       setEmail('')
-      refetch()
     } catch (err) {
       setError(err.message)
     } finally {
@@ -70,12 +31,11 @@ export default function ClubSharePanel({ clubId, isOwner }) {
 
   async function handleRevoke(userId) {
     setError('')
-    const { error: err } = await supabase.rpc('revoke_club_access', {
-      p_club_id: clubId,
-      p_user_id: userId,
-    })
-    if (err) setError(err.message)
-    else refetch()
+    try {
+      await revoke(userId)
+    } catch (err) {
+      setError(err.message)
+    }
   }
 
   return (
@@ -104,7 +64,7 @@ export default function ClubSharePanel({ clubId, isOwner }) {
         </>
       )}
 
-      {error && <p className="auth-error" style={{ marginTop: 12 }}>{error}</p>}
+      {(error || loadError) && <p className="auth-error" style={{ marginTop: 12 }}>{error || loadError}</p>}
 
       {loading ? (
         <SkeletonList count={2} lines={1} />

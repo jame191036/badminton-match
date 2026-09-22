@@ -1,12 +1,6 @@
 import { skillLabel } from '../utils/pairing'
-
-function formatMinutes(min) {
-  if (!min) return '—'
-  if (min < 60) return `${min} นาที`
-  const h = Math.floor(min / 60)
-  const m = min % 60
-  return m === 0 ? `${h} ชม.` : `${h} ชม. ${m} นาที`
-}
+import { formatMinutes } from '../utils/date'
+import { byRanking, scoredGames } from '../utils/ranking'
 
 const STATUS_LABEL = {
   waiting: 'รอคิว',
@@ -25,12 +19,16 @@ export default function SessionStats({ players, summary }) {
     return <p className="empty-state small">ยังไม่มีผู้เล่นที่มา</p>
   }
 
-  // เล่นเยอะสุดขึ้นก่อน คนที่ยังไม่ได้ลงเลยจะไปอยู่ท้ายสุด
+  // มีเกมที่จดแต้ม = เรียงตามอันดับแพ้/ชนะ ไม่งั้นเล่นเยอะสุดขึ้นก่อน
+  const hasScores = present.some((p) => scoredGames(p) > 0)
   const ranked = [...present].sort(
-    (a, b) => b.gamesPlayed - a.gamesPlayed || b.minutesPlayed - a.minutesPlayed
+    hasScores
+      ? byRanking
+      : (a, b) => b.gamesPlayed - a.gamesPlayed || b.minutesPlayed - a.minutesPlayed,
   )
-  const maxGames = ranked[0]?.gamesPlayed ?? 0
-  const minGames = ranked[ranked.length - 1]?.gamesPlayed ?? 0
+  const games = present.map((p) => p.gamesPlayed)
+  const maxGames = Math.max(...games)
+  const minGames = Math.min(...games)
 
   return (
     <div className="stats">
@@ -75,6 +73,7 @@ export default function SessionStats({ players, summary }) {
         <span className="stats-skill">ระดับมือ</span>
         <span className="stats-status">สถานะ</span>
         <span className="stats-games">เล่นแล้ว</span>
+        {hasScores && <span className="stats-record">ชนะ–แพ้</span>}
         <span className="stats-minutes">เวลา</span>
       </div>
 
@@ -87,6 +86,11 @@ export default function SessionStats({ players, summary }) {
               {STATUS_LABEL[p.status] ?? p.status}
             </span>
             <span className="stats-games mono">{p.gamesPlayed} เกม</span>
+            {hasScores && (
+              <span className="stats-record mono" title={`แต้มได้-เสีย ${p.pointDiff > 0 ? '+' : ''}${p.pointDiff}`}>
+                {p.wins}–{p.losses}
+              </span>
+            )}
             <span className="stats-minutes mono">{formatMinutes(p.minutesPlayed)}</span>
           </li>
         ))}

@@ -1,8 +1,6 @@
 import { skillLabel } from '../utils/pairing'
 import AsyncButton from './AsyncButton'
 
-const SKILL_CLASS = { 1: 'skill-1', 2: 'skill-2', 3: 'skill-3' }
-
 /**
  * closed = วันเล่นจบไปแล้ว สถานะที่เห็นคือภาพตอนกดจบวัน ไม่ใช่คิวที่เดินอยู่
  * เปลี่ยนแค่ป้ายหัวข้อ เพราะ "คิวรอลงคอร์ต (9)" บนวันที่จบแล้วอ่านเหมือน
@@ -37,7 +35,7 @@ export default function PlayerQueue({
             <li key={p.id} className="queue-item">
               <span className="queue-pos mono">{i + 1}</span>
               <span className="queue-name">{p.name}</span>
-              <span className={`skill-badge ${SKILL_CLASS[p.skill]}`}>{skillLabel(p.skill)}</span>
+              <span className={`skill-badge skill-${p.skill}`}>{skillLabel(p.skill)}</span>
               <span className="games-count mono" title="จำนวนเกมที่เล่นแล้ว">{p.gamesPlayed} เกม</span>
               {!readOnly && (
                 <>
@@ -70,7 +68,7 @@ export default function PlayerQueue({
             {resting.map((p) => (
               <li key={p.id} className="queue-item resting">
                 <span className="queue-name">{p.name}</span>
-                <span className={`skill-badge ${SKILL_CLASS[p.skill]}`}>{skillLabel(p.skill)}</span>
+                <span className={`skill-badge skill-${p.skill}`}>{skillLabel(p.skill)}</span>
                 {!readOnly && (
                   <>
                     <AsyncButton onClick={() => onToggleRest(p.id)}>กลับเข้าคิว</AsyncButton>
@@ -91,7 +89,7 @@ export default function PlayerQueue({
             {absent.map((p) => (
               <li key={p.id} className="queue-item absent">
                 <span className="queue-name">{p.name}</span>
-                <span className={`skill-badge ${SKILL_CLASS[p.skill]}`}>{skillLabel(p.skill)}</span>
+                <span className={`skill-badge skill-${p.skill}`}>{skillLabel(p.skill)}</span>
                 {!readOnly && (
                   <>
                     <AsyncButton onClick={() => onSetAttendance(p.id, true)}>มาแล้ว</AsyncButton>

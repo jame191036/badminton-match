@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import ThemeToggle from './ThemeToggle'
 import PasswordField from './PasswordField'
+import { Mail } from 'lucide-react'
 
 const TABS = [
   { id: 'signin', label: 'เข้าสู่ระบบ' },
@@ -74,10 +75,7 @@ export default function Login({ onSignIn, onSignUp, onForgotPassword, theme, onT
           {sent ? (
             <div className="auth-sent">
               <div className="auth-sent-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="2.5" y="4.5" width="19" height="15" rx="2.5" />
-                  <path d="m3.5 6.5 8.5 6 8.5-6" />
-                </svg>
+                <Mail strokeWidth={1.8} />
               </div>
               <h2>{sent.kind === 'verify' ? 'ยืนยันอีเมลของคุณ' : 'ส่งลิงก์ตั้งรหัสผ่านแล้ว'}</h2>
               <p className="auth-sent-text">
@@ -127,10 +125,7 @@ export default function Login({ onSignIn, onSignUp, onForgotPassword, theme, onT
                 <label className="auth-field">
                   <span className="auth-label">อีเมล</span>
                   <span className="auth-input-wrap">
-                    <svg className="auth-input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <rect x="2.5" y="4.5" width="19" height="15" rx="2.5" />
-                      <path d="m3.5 6.5 8.5 6 8.5-6" />
-                    </svg>
+                    <Mail className="auth-input-icon" strokeWidth={1.8} aria-hidden="true" />
                     <input
                       type="email"
                       required

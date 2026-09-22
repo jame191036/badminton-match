@@ -9,16 +9,19 @@ export function skillLabel(value) {
   return SKILL_LEVELS.find((s) => s.value === value)?.label ?? '-'
 }
 
+// สองโหมดนี้ต่างกันแค่ "ดูประวัติคู่หรือไม่" ส่วนการบังคับพักเป็นสวิตช์แยก
+// (forceRest) เพราะมันใช้ได้กับทั้งสองโหมด และเดิมที่ซ่อนไว้ในชื่อโหมดทำให้
+// อธิบายไม่ได้ว่าต่างกันตรงไหน — ทั้งสองโหมดเอา "จำนวนเกม" มาก่อนเสมอ
 export const QUEUE_MODES = [
-  { value: 'sequential', label: 'ตามลำดับคิว', hint: 'เอา 4 คนแรกในคิวลงเลย' },
-  { value: 'rotate', label: 'สลับคู่', hint: 'เลี่ยงการเจอคู่เดิมซ้ำ ๆ' },
+  { value: 'sequential', label: 'ตามลำดับคิว', hint: 'เอา 4 คนแรกในคิวลงเลย — คู่เดิมมักวนมาเจอกัน' },
+  { value: 'rotate', label: 'เน้นเล่นเท่ากัน', hint: 'เลี่ยงการเจอคู่เดิมซ้ำ ๆ' },
 ]
 
 // น้ำหนักของโหมด rotate — ปรับตรงนี้ได้ถ้ารู้สึกว่ามันสลับมาก/น้อยเกินไป
 const WEIGHT = {
   together: 10, // เคยอยู่ทีมเดียวกัน — สิ่งที่อยากเลี่ยงที่สุด
   against: 3, //  เคยเจอกันคนละฝั่ง — เลี่ยงรองลงมา
-  skillGap: 2, //  ผลต่างฝีมือของสองทีม
+  skillGap: 4, //  ผลต่างฝีมือของสองทีม (4 = ลดเกมเก่งคู่เก่งชนมือใหม่ โดยยังสลับคู่ได้พอ ๆ เดิม)
   queueSkip: 1, // ข้ามคิวคนที่รออยู่ก่อน — กันไม่ให้เลี่ยงคู่ซ้ำจนคิวเพี้ยน
 }
 
@@ -40,33 +43,25 @@ function byFairness(p1, p2) {
   return p1.queuedAt - p2.queuedAt
 }
 
-// Given exactly 4 players, find the 2v2 split that minimizes the
-// skill-sum gap between the two teams.
-export function bestTeamSplit(fourPlayers) {
-  const [a, b, c, d] = fourPlayers
-  const combos = [
-    { teamA: [a, b], teamB: [c, d] },
-    { teamA: [a, c], teamB: [b, d] },
-    { teamA: [a, d], teamB: [b, c] },
-  ]
-  let best = combos[0]
-  let bestGap = Infinity
-  for (const combo of combos) {
-    const sumA = combo.teamA.reduce((s, p) => s + p.skill, 0)
-    const sumB = combo.teamB.reduce((s, p) => s + p.skill, 0)
-    const gap = Math.abs(sumA - sumB)
-    if (gap < bestGap) {
-      bestGap = gap
-      best = combo
-    }
-  }
-  return best
+// ระดับมือ 1–3 -> rating ตั้งต้น (100 แต้ม ≈ หนึ่งระดับมือ) — ต้องตรงกับ skill_rating() ใน SQL
+export const skillRating = (skill) => 800 + 100 * skill
+
+// ความเก่งที่ใช้จับคู่: rating ที่เรียนรู้จากแต้มจริง ถ้ายังไม่มี (แขก / ยังไม่เคยจดแต้ม) ใช้ระดับมือ
+export const strength = (p) => p.rating ?? skillRating(p.skill)
+
+const teamRating = (team) => team.reduce((s, p) => s + strength(p), 0) / team.length
+
+/** โอกาสที่ทีม A ชนะ ตามสูตร Elo เดียวกับ apply_match_rating ใน SQL — 0.5 = สูสีพอดี */
+export function winChance(teamA, teamB) {
+  return 1 / (1 + 10 ** ((teamRating(teamB) - teamRating(teamA)) / 400))
 }
 
+// ผลต่างความเก่งของสองทีม วัดเป็น "ระดับมือ" (100 rating = 1) ให้ WEIGHT.skillGap
+// ยังมีความหมายเดิมตอนที่ทุกคนยังใช้ค่าจากระดับมืออยู่
 function skillGap({ teamA, teamB }) {
-  const sumA = teamA.reduce((s, p) => s + p.skill, 0)
-  const sumB = teamB.reduce((s, p) => s + p.skill, 0)
-  return Math.abs(sumA - sumB)
+  const sumA = teamA.reduce((s, p) => s + strength(p), 0)
+  const sumB = teamB.reduce((s, p) => s + strength(p), 0)
+  return Math.abs(sumA - sumB) / 100
 }
 
 // ยิ่งคะแนนต่ำยิ่งดี
@@ -114,6 +109,25 @@ function* chooseFour(list) {
           yield { players: [list[i], list[j], list[k], list[l]], indices: [i, j, k, l] }
 }
 
+/**
+ * บังคับพัก 1 เกม: คนที่เพิ่งเล่นจบ (rested === false) ยังไม่ถูกเลือก
+ * จนกว่าจะมีเกมที่จับคู่หลังจากเขาจบเล่นจบไปแล้วหนึ่งเกม (ดู v_session_player_stats)
+ *
+ * เป็น soft rule: คนพักครบมีไม่ถึง 4 ก็เติมจากคนที่ยังพักไม่ครบ — จับคู่ต้องได้เสมอ
+ * (เช่น 5 คน 1 คอร์ต ไม่มีทางให้ทุกคนพักครบได้)
+ *
+ * ตัวเติมเรียงตาม "พักมานานสุด" (queuedAt น้อย = กลับเข้าคิวก่อน) ไม่ใช่ตามจำนวนเกม
+ * ถ้าเรียงตามจำนวนเกม คนมาสายจะถูกดึงกลับลงทันทีทุกรอบเพราะเกมน้อยกว่าเพื่อน
+ * ซึ่งคือปัญหาที่กติกานี้ตั้งใจแก้ — เมื่อคนเกินครึ่งอยู่ในคอร์ต (เช่น 12 คน 2 คอร์ต)
+ * แทบไม่มีใครพักครบเกม กรณีนี้จึงเกิดบ่อย ไม่ใช่กรณีขอบ
+ */
+function restFirst(sorted) {
+  const rested = sorted.filter((p) => p.rested !== false)
+  if (rested.length >= 4) return rested
+  const tired = sorted.filter((p) => p.rested === false).sort((a, b) => a.queuedAt - b.queuedAt)
+  return [...rested, ...tired].slice(0, 4)
+}
+
 function splitsOf(four) {
   const [a, b, c, d] = four
   return [
@@ -133,16 +147,19 @@ function splitsOf(four) {
 export function pickNextMatch(waitingPlayers, options = {}) {
   if (waitingPlayers.length < 4) return null
 
-  const { mode = 'sequential', pairStats = null } = options
-  const sorted = [...waitingPlayers].sort(byFairness)
+  const { mode = 'sequential', pairStats = null, forceRest = true } = options
+  const byGames = [...waitingPlayers].sort(byFairness)
+  // ปิดบังคับพัก = จำนวนเกมเป็นตัวตัดสินเดียว และมีคนให้เลือกจับคู่มากขึ้น
+  const sorted = forceRest ? restFirst(byGames) : byGames
 
   if (mode !== 'rotate' || !pairStats || pairStats.size === 0) {
-    const four = sorted.slice(0, 4)
-    const { teamA, teamB } = bestTeamSplit(four)
-    return { teamA, teamB, playerIds: four.map((p) => p.id) }
+    // 2v2 ที่ผลรวมฝีมือสองทีมห่างกันน้อยสุด (เท่ากันเอาแบบแรก)
+    return splitsOf(sorted.slice(0, 4)).reduce((best, s) => (skillGap(s) < skillGap(best) ? s : best))
   }
 
-  const window = fairPool(sorted)
+  // restFirst อาจตัดเหลือ 4 คนพอดี ซึ่งเลือกไว้แล้วด้วยกติกาพัก — ห้ามให้ fairPool
+  // กรองซ้ำตามจำนวนเกม (คนพักครบที่เล่นมากกว่าจะหลุดจนเหลือไม่ถึง 4)
+  const window = sorted.length > 4 ? fairPool(sorted) : sorted
 
   let best = null
   let bestGames = Infinity
@@ -168,9 +185,5 @@ export function pickNextMatch(waitingPlayers, options = {}) {
     }
   }
 
-  return {
-    teamA: best.teamA,
-    teamB: best.teamB,
-    playerIds: [...best.teamA, ...best.teamB].map((p) => p.id),
-  }
+  return best
 }
