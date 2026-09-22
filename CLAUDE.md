@@ -40,11 +40,27 @@ Auth is email + password (`useAuth`), with a reset-password flow: `onAuthStateCh
 
 **Pairing logic is pure and isolated** in `src/utils/pairing.js` — keep it that way; it, `ranking.js`, `billing.js` and `promptpay.js` in `src/utils/` are the parts of the app testable without a database. Node runs them directly for `npm run check`, so imports between them must carry the `.js` extension. Skill is 1–3 and `SKILL_LEVELS` here is the single source of the labels.
 
-`pickNextMatch(waiting, { mode, pairStats })` has two modes, chosen by `sessions.queue_mode`:
-- `sequential` — sort by `gamesPlayed` then `queuedAt`, take the first 4, and pick the 2v2 split with the smallest skill-sum gap.
-- `rotate` — `fairPool` first drops anyone who has played more games than the 4th-least-played waiting player, then takes the first `ROTATE_WINDOW` (8) of that fair ordering, enumerates every choice of 4 and every 2v2 split, and scores each with the `WEIGHT` table: repeat partners cost most, then repeat opponents, then skill gap, then how far down the queue it reached. Tune by editing `WEIGHT`.
+`pickNextMatch(waiting, { mode, pairStats, forceRest })` is controlled by **two independent settings**, not one list of modes. `sessions.queue_mode` picks how pairs are chosen and `sessions.force_rest` toggles the rest rule; every combination is valid, so the UI shows two controls rather than three buttons.
+
+**`queue_mode` — does it look at pair history?**
+- `sequential` — sort by `gamesPlayed` then `queuedAt`, take the first 4, and pick the 2v2 split with the smallest skill-sum gap. Never reads `pairStats`.
+- `rotate` — `fairPool` first drops anyone who has played more games than the 4th-least-played waiting player, then takes the first `ROTATE_WINDOW` (8) of that fair ordering, enumerates every choice of 4 and every 2v2 split, and scores each with the `WEIGHT` table: repeat partners cost most, then repeat opponents, then skill gap, then how far down the queue it reached. Tune by editing `WEIGHT`. Falls back to the `sequential` split whenever `pairStats` is empty.
 
   `rotate` is the default for new days. `sequential` requeues the four who finished together as a group, so with a court-multiple of players (8, 12, 16) the same foursomes — and the same partners — repeat all day; a simulated 12-player day gave everyone a single partner ten times over. `WEIGHT.skillGap` is 4 (was 2): in the same simulations it cut the average team skill gap by about a third without losing partner variety.
+
+**Both settings put games played first.** Neither mode will trade an equal game count for pairing variety — see the lexicographic rule below. There is deliberately no "variety above all" option: that was the original `rotate` and it starved players (a simulated 8-player, 20-game day left one player on 0 games).
+
+**Why `force_rest` is its own column and not a third mode.** It was briefly shipped as `queue_mode = 'fair'` (migration 115, replaced by 116) and that was a mistake: the rest rule applies to both modes, so encoding it in the mode name made two entries differ by something invisible from their labels and left the fourth combination unreachable.
+
+The switch matters far more than it looks, because `restFirst` returns **exactly four** players when fewer than four are rested — that leaves `chooseFour` one combination and nothing to choose, so `rotate` collapses to "whoever is available" in precisely the crowded case it exists to help. Turning the rest rule off restores the choice. Simulated over 40 games, partnerships used out of all possible:
+
+| | 10p/2c | 12p/2c | 16p/3c | 17p/4c |
+|---|---|---|---|---|
+| `sequential`, either switch | 5/45 | 6/66 | 8/120 | 29/136 |
+| `rotate` + rest | 44/45 | 18/66 | 24/120 | 46/136 |
+| `rotate`, no rest | 45/45 | **62/66** | **78/120** | **68/136** |
+
+Game-count spread stayed 0–1 in every cell, so the switch costs nothing measurable — turning the rest rule **on** only buys real-world freshness, which no simulation can see. That is a real benefit for tired players, which is why it stays on by default; it is not a fairness feature.
 
   Candidate sets are compared **lexicographically — total games played first, `WEIGHT` score only as the tie-break.** Do not fold games-played into the weighted score: a player who has already partnered everyone present always costs a repeat-partner penalty, which outweighs any skip penalty, so a weighted sum skips them game after game. `sequential` mode is the fallback whenever `pairStats` is empty and is unaffected by any of this.
 

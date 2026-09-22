@@ -9,11 +9,12 @@ export function skillLabel(value) {
   return SKILL_LEVELS.find((s) => s.value === value)?.label ?? '-'
 }
 
-// rotate อยู่ก่อนเพราะเป็นค่าเริ่มของวันใหม่ — sequential เอา 4 คนที่จบเกมพร้อมกัน
-// กลับลงไปด้วยกันเรื่อย ๆ ถ้าคนเต็มคอร์ตพอดี (8, 12, 16) จะได้คู่เดิมทั้งวัน
+// สองโหมดนี้ต่างกันแค่ "ดูประวัติคู่หรือไม่" ส่วนการบังคับพักเป็นสวิตช์แยก
+// (forceRest) เพราะมันใช้ได้กับทั้งสองโหมด และเดิมที่ซ่อนไว้ในชื่อโหมดทำให้
+// อธิบายไม่ได้ว่าต่างกันตรงไหน — ทั้งสองโหมดเอา "จำนวนเกม" มาก่อนเสมอ
 export const QUEUE_MODES = [
-  { value: 'rotate', label: 'สลับคู่', hint: 'เลี่ยงการเจอคู่เดิมซ้ำ ๆ' },
   { value: 'sequential', label: 'ตามลำดับคิว', hint: 'เอา 4 คนแรกในคิวลงเลย — คู่เดิมมักวนมาเจอกัน' },
+  { value: 'rotate', label: 'เน้นเล่นเท่ากัน', hint: 'เลี่ยงการเจอคู่เดิมซ้ำ ๆ' },
 ]
 
 // น้ำหนักของโหมด rotate — ปรับตรงนี้ได้ถ้ารู้สึกว่ามันสลับมาก/น้อยเกินไป
@@ -146,8 +147,10 @@ function splitsOf(four) {
 export function pickNextMatch(waitingPlayers, options = {}) {
   if (waitingPlayers.length < 4) return null
 
-  const { mode = 'sequential', pairStats = null } = options
-  const sorted = restFirst([...waitingPlayers].sort(byFairness))
+  const { mode = 'sequential', pairStats = null, forceRest = true } = options
+  const byGames = [...waitingPlayers].sort(byFairness)
+  // ปิดบังคับพัก = จำนวนเกมเป็นตัวตัดสินเดียว และมีคนให้เลือกจับคู่มากขึ้น
+  const sorted = forceRest ? restFirst(byGames) : byGames
 
   if (mode !== 'rotate' || !pairStats || pairStats.size === 0) {
     // 2v2 ที่ผลรวมฝีมือสองทีมห่างกันน้อยสุด (เท่ากันเอาแบบแรก)

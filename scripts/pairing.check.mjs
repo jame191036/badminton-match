@@ -23,6 +23,23 @@ assert.deepEqual(ids(pickNextMatch([...tired, ...fresh], { mode: 'rotate', pairS
 // fewer than 4 rested: take all rested, fill from tired — must not crash when the rested one has more games
 m = pickNextMatch([{ ...P(9, 2, 6) }, ...tired], { mode: 'rotate', pairStats: stats })
 assert.ok(ids(m).includes(9) && ids(m).length === 4)
+// forceRest: false — the same input that answers with the rested four now goes to
+// the four with fewer games instead. This contrast is the whole point of the switch,
+// and it is independent of the mode, so assert it for both.
+for (const mode of ['sequential', 'rotate']) {
+  const opts = { mode, pairStats: stats }
+  assert.deepEqual(ids(pickNextMatch([...tired, ...fresh], opts)), [1, 2, 3, 4])
+  assert.deepEqual(ids(pickNextMatch([...tired, ...fresh], { ...opts, forceRest: false })), [5, 6, 7, 8])
+}
+// the switch is also honoured before any pair history exists (first game of the day)
+assert.deepEqual(ids(pickNextMatch([...tired, ...fresh], { forceRest: false })), [5, 6, 7, 8])
+// rotate still avoids repeat partners with the rest rule off: 1&2 played together 3 times
+m = pickNextMatch([P(1, 2), P(2, 2), P(3, 2), P(4, 2)], {
+  mode: 'rotate',
+  pairStats: stats,
+  forceRest: false,
+})
+assert.ok(!m.teamA.some((p) => p.id === 1) || !m.teamA.some((p) => p.id === 2))
 // rating beats skill label: two "intermediates" rated like aces split across teams
 const rated = [P(1, 2), P(2, 2), { ...P(3, 2), rating: 1300 }, { ...P(4, 2), rating: 1300 }]
 m = pickNextMatch(rated)

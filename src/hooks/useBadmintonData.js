@@ -20,7 +20,7 @@ function mapPlayer(row) {
   }
 }
 
-export function useBadmintonData(sessionId, queueMode = 'sequential') {
+export function useBadmintonData(sessionId, queueMode = 'sequential', forceRest = true) {
   const [players, setPlayers] = useState([])
   const [courts, setCourts] = useState([])
   const [history, setHistory] = useState([])
@@ -338,7 +338,7 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
   const assignCourt = useCallback(
     async (courtId) => {
       const waiting = players.filter((p) => p.status === 'waiting')
-      const match = pickNextMatch(waiting, { mode: queueMode, pairStats })
+      const match = pickNextMatch(waiting, { mode: queueMode, pairStats, forceRest })
       if (!match) {
         setActionError('คนรอคิวไม่ครบ 4 คน')
         return
@@ -351,7 +351,7 @@ export function useBadmintonData(sessionId, queueMode = 'sequential') {
         }),
       )
     },
-    [players, queueMode, pairStats, run]
+    [players, queueMode, forceRest, pairStats, run]
   )
 
   // pending -> playing (เริ่มจับเวลา)

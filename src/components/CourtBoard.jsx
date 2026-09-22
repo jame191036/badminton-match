@@ -123,6 +123,8 @@ export default function CourtBoard({
   onRenameCourt,
   queueMode,
   onChangeQueueMode,
+  forceRest,
+  onChangeForceRest,
 }) {
   const hasRunning = courts.some((c) => c.match?.status === 'playing')
   const now = useNow(hasRunning)
@@ -163,6 +165,23 @@ export default function CourtBoard({
         <span className="queue-mode-hint">
           {QUEUE_MODES.find((m) => m.value === queueMode)?.hint}
         </span>
+
+        {/* สวิตช์แยกจากโหมด เพราะใช้ได้กับทั้งสองโหมด
+            ปิดแล้วมีคนให้เลือกจับคู่มากขึ้น คู่จึงหลากหลายกว่า แต่คนไม่ได้พัก */}
+        <label className="rest-toggle">
+          <input
+            type="checkbox"
+            checked={forceRest}
+            disabled={readOnly}
+            onChange={(e) => onChangeForceRest(e.target.checked)}
+          />
+          <span>
+            บังคับพัก 1 เกมก่อนลงใหม่
+            <span className="rest-toggle-hint">
+              {forceRest ? 'คนเพิ่งเล่นจบต้องรออีกเกม' : 'ใครเล่นน้อยสุดได้ลงเลย ไม่ต้องรอ'}
+            </span>
+          </span>
+        </label>
       </div>
 
       <div className="court-grid">

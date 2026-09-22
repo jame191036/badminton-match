@@ -59,6 +59,7 @@ export default function PlayDayPage() {
     clearSaveError,
     updateBilling,
     updateQueueMode,
+    updateForceRest,
     startDay,
     closeDay,
     refetch: refetchDay,
@@ -91,7 +92,7 @@ export default function PlayDayPage() {
     cancelMatch,
     finishMatch,
     setMatchScore,
-  } = useBadmintonData(sessionId, day?.queueMode ?? 'sequential')
+  } = useBadmintonData(sessionId, day?.queueMode ?? 'sequential', day?.forceRest ?? true)
 
   const [headError, setHeadError] = useState('')
   const [tab, setTab] = useState('board')
@@ -409,6 +410,8 @@ export default function PlayDayPage() {
                   waitingCount={waitingCount}
                   queueMode={day.queueMode}
                   onChangeQueueMode={updateQueueMode}
+                  forceRest={day.forceRest}
+                  onChangeForceRest={updateForceRest}
                   onAddCourt={addCourt}
                   onRemoveCourt={removeCourt}
                   onRenameCourt={renameCourt}

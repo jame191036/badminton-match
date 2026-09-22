@@ -361,6 +361,38 @@
 
 .queue-mode-hint { font-size: 0.78rem; color: var(--text-faintest); }
 
+/* ขึ้นบรรทัดใหม่เต็มความกว้าง — เป็นสวิตช์ของตัวเอง ไม่ใช่ตัวเลือกที่สามของโหมด
+   ถ้าวางต่อท้ายปุ่มโหมดจะอ่านเหมือนเป็นปุ่มพวกเดียวกัน */
+.rest-toggle {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.rest-toggle input {
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  flex: none;
+  accent-color: var(--court);
+  cursor: pointer;
+}
+
+.rest-toggle input:disabled { cursor: not-allowed; }
+.rest-toggle:has(input:disabled) { cursor: default; color: var(--text-faint); }
+
+/* คำอธิบายผลของสวิตช์ เปลี่ยนตามสถานะ — บอกผลลัพธ์ ไม่ใช่บอกซ้ำว่าปุ่มชื่ออะไร */
+.rest-toggle-hint {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--text-faintest);
+}
+
 .court-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));

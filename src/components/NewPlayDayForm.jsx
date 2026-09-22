@@ -52,6 +52,7 @@ export default function NewPlayDayForm({
   const [hourlyRate, setHourlyRate] = useState(initial?.hourlyRate ?? '')
   const [shuttlePrice, setShuttlePrice] = useState(initial?.shuttlePrice ?? '')
   const [queueMode, setQueueMode] = useState(initial?.queueMode ?? 'rotate')
+  const [forceRest, setForceRest] = useState(initial?.forceRest ?? true)
   const [memberQuery, setMemberQuery] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -81,6 +82,7 @@ export default function NewPlayDayForm({
         setHourlyRate(d.hourly_rate ? String(d.hourly_rate) : '')
         setShuttlePrice(d.shuttle_price ? String(d.shuttle_price) : '')
         setQueueMode(d.queue_mode ?? 'rotate')
+        setForceRest(d.force_rest ?? true)
         if (Array.isArray(d.courts) && d.courts.length > 0) {
           setCourts(d.courts.map((c) => ({ name: c.name, hours: String(c.hours ?? '') })))
         }
@@ -155,6 +157,7 @@ export default function NewPlayDayForm({
         shuttlePrice: shuttlePrice === '' ? null : Number(shuttlePrice),
         shuttleCount: shuttleCount === '' ? 0 : Number(shuttleCount),
         queueMode,
+        forceRest,
         memberIds: initial ? undefined : [...selected],
         courts: cleanCourts,
       })
@@ -531,6 +534,21 @@ export default function NewPlayDayForm({
               </option>
             ))}
           </select>
+        </label>
+
+        {/* แยกจากโหมดเพราะใช้ได้กับทั้งสองโหมด สลับกลางวันได้จากหน้ากระดาน */}
+        <label className="rest-toggle">
+          <input
+            type="checkbox"
+            checked={forceRest}
+            onChange={(e) => setForceRest(e.target.checked)}
+          />
+          <span>
+            บังคับพัก 1 เกมก่อนลงใหม่
+            <span className="rest-toggle-hint">
+              ปิดแล้วคู่จะหลากหลายกว่า แต่คนเพิ่งเล่นจบอาจได้ลงต่อเลย
+            </span>
+          </span>
         </label>
       </FormSection>
 

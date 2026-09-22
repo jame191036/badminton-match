@@ -15,6 +15,8 @@ function mapDay(row) {
     shuttleBrandId: row.shuttle_brand_id,
     shuttleModelId: row.shuttle_model_id,
     queueMode: row.queue_mode ?? 'sequential',
+    // บังคับพัก 1 เกมก่อนลงใหม่ — แยกจากโหมดคิว ใช้ได้กับทั้งสองโหมด
+    forceRest: row.force_rest ?? true,
     finals: {
       totalFee: Number(row.final_total_fee ?? 0),
       perPerson: Number(row.final_per_person ?? 0),
@@ -195,22 +197,35 @@ export function usePlayDay(sessionId) {
     return () => supabase.removeChannel(channel)
   }, [sessionId])
 
-  const updateQueueMode = useCallback(
-    async (mode) => {
-      setDay((prev) => (prev ? { ...prev, queueMode: mode } : prev))
+  /**
+   * เปลี่ยนการตั้งค่าการจับคู่ — โชว์บนจอทันทีแล้วค่อยยิงขึ้น server
+   *
+   * patch เป็นชื่อคอลัมน์จริง (snake_case) ส่วน local เป็นชื่อในรูปแบบที่
+   * component ใช้ (camelCase) เขียนรวมกันเพราะสองปุ่มนี้ต่างกันแค่ชื่อคอลัมน์
+   */
+  const updateQueueSetting = useCallback(
+    async (patch, local) => {
+      setDay((prev) => (prev ? { ...prev, ...local } : prev))
       if (!sessionId) return
-      const { error: err } = await supabase
-        .from('sessions')
-        .update({ queue_mode: mode })
-        .eq('id', sessionId)
+      const { error: err } = await supabase.from('sessions').update(patch).eq('id', sessionId)
       if (err) {
         console.error(err)
-        setSaveError(`เปลี่ยนโหมดคิวไม่สำเร็จ: ${err.message}`)
+        setSaveError(`เปลี่ยนวิธีจับคู่ไม่สำเร็จ: ${err.message}`)
       } else {
         setSaveError('')
       }
     },
     [sessionId],
+  )
+
+  const updateQueueMode = useCallback(
+    (mode) => updateQueueSetting({ queue_mode: mode }, { queueMode: mode }),
+    [updateQueueSetting],
+  )
+
+  const updateForceRest = useCallback(
+    (on) => updateQueueSetting({ force_rest: on }, { forceRest: on }),
+    [updateQueueSetting],
   )
 
   const startDay = useCallback(async () => {
@@ -246,6 +261,7 @@ export function usePlayDay(sessionId) {
     clearSaveError,
     updateBilling,
     updateQueueMode,
+    updateForceRest,
     startDay,
     closeDay,
     refetch,
