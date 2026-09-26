@@ -6,7 +6,7 @@ import { useShuttleModels } from '../hooks/useShuttleModels'
 import SearchSelect from './SearchSelect'
 import SearchBox from './SearchBox'
 import DatePicker from './DatePicker'
-import { QUEUE_MODES, skillLabel } from '../utils/pairing'
+import { IGNORES_FORCE_REST, QUEUE_MODES, skillLabel } from '../utils/pairing'
 import { addDays, addHours, clock, hoursBetween, thaiDate, todayISO } from '../utils/date'
 
 // เวลาเริ่มที่ก๊วนแบดใช้กันจริง ๆ และความยาวที่จองกันบ่อย
@@ -536,17 +536,20 @@ export default function NewPlayDayForm({
           </select>
         </label>
 
-        {/* แยกจากโหมดเพราะใช้ได้กับทั้งสองโหมด สลับกลางวันได้จากหน้ากระดาน */}
+        {/* แยกจากโหมดเพราะสองโหมดแรกใช้ได้ทั้งคู่ สลับกลางวันได้จากหน้ากระดาน */}
         <label className="rest-toggle">
           <input
             type="checkbox"
             checked={forceRest}
+            disabled={IGNORES_FORCE_REST.includes(queueMode)}
             onChange={(e) => setForceRest(e.target.checked)}
           />
           <span>
             บังคับพัก 1 เกมก่อนลงใหม่
             <span className="rest-toggle-hint">
-              ปิดแล้วคู่จะหลากหลายกว่า แต่คนเพิ่งเล่นจบอาจได้ลงต่อเลย
+              {IGNORES_FORCE_REST.includes(queueMode)
+                ? 'วิธีจับคู่ที่เลือกไว้ไม่ใช้กติกานี้'
+                : 'ปิดแล้วคู่จะหลากหลายกว่า แต่คนเพิ่งเล่นจบอาจได้ลงต่อเลย'}
             </span>
           </span>
         </label>

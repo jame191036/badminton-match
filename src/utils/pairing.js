@@ -9,13 +9,24 @@ export function skillLabel(value) {
   return SKILL_LEVELS.find((s) => s.value === value)?.label ?? '-'
 }
 
-// สองโหมดนี้ต่างกันแค่ "ดูประวัติคู่หรือไม่" ส่วนการบังคับพักเป็นสวิตช์แยก
-// (forceRest) เพราะมันใช้ได้กับทั้งสองโหมด และเดิมที่ซ่อนไว้ในชื่อโหมดทำให้
-// อธิบายไม่ได้ว่าต่างกันตรงไหน — ทั้งสองโหมดเอา "จำนวนเกม" มาก่อนเสมอ
+// สองโหมดแรกเอา "จำนวนเกม" มาก่อนเสมอ ต่างกันแค่ดูประวัติคู่หรือไม่ และใช้
+// สวิตช์บังคับพัก (forceRest) ได้ทั้งคู่
+//
+// variety เป็นโหมดคนละแนวคิด: เอาความหลากหลายของคู่มาก่อนจำนวนเกม และไม่ใช้
+// สวิตช์บังคับพักเลย (กติกาพักบีบตัวเลือกเหลือ 4 คนพอดี ซึ่งทำลายสิ่งที่
+// โหมดนี้มีอยู่เพื่อมัน) — ดู pickVariety
 export const QUEUE_MODES = [
   { value: 'sequential', label: 'ตามลำดับคิว', hint: 'เอา 4 คนแรกในคิวลงเลย — คู่เดิมมักวนมาเจอกัน' },
   { value: 'rotate', label: 'เน้นเล่นเท่ากัน', hint: 'เลี่ยงการเจอคู่เดิมซ้ำ ๆ' },
+  {
+    value: 'variety',
+    label: 'เน้นไม่ซ้ำคู่',
+    hint: 'เลี่ยงคู่ซ้ำเป็นหลัก ยอมให้จำนวนเกมไม่เท่ากัน · ไม่ใช้การบังคับพัก',
+  },
 ]
+
+/** โหมดที่ไม่สนสวิตช์บังคับพัก — หน้าจอเอาไปปิดช่องติ๊กให้ตรงความจริง */
+export const IGNORES_FORCE_REST = ['variety']
 
 // น้ำหนักของโหมด rotate — ปรับตรงนี้ได้ถ้ารู้สึกว่ามันสลับมาก/น้อยเกินไป
 const WEIGHT = {
@@ -28,6 +39,25 @@ const WEIGHT = {
 // จำนวนคนหัวคิวที่หยิบมาพิจารณาในโหมด rotate
 // ยิ่งกว้างยิ่งเลี่ยงคู่ซ้ำได้ดี แต่ก็ข้ามคิวได้ไกลขึ้น
 const ROTATE_WINDOW = 8
+
+// น้ำหนักของโหมด variety — คู่ซ้ำแพงจนกลบทุกอย่าง และไม่คิดค่าข้ามคิวเลย
+// (ตรงข้ามกับ rotate ที่เอาจำนวนเกมมาก่อนแล้วใช้คะแนนพวกนี้เป็นตัวตัดสินรอง)
+const VARIETY_WEIGHT = {
+  together: 100, // เคยอยู่ทีมเดียวกัน — เลี่ยงก่อนอย่างอื่นทั้งหมด
+  against: 20, //  เคยเจอกันคนละฝั่ง
+  skillGap: 4, //  ใช้ตัดสินเมื่อความสดของคู่เท่ากัน (ค่าเดียวกับ rotate)
+  queueSkip: 0, // ไม่สนลำดับคิว — นี่คือจุดต่างของโหมดนี้
+}
+
+// วงกว้างกว่า rotate เพราะยิ่งมีตัวเลือกเยอะยิ่งหาคู่ที่ไม่ซ้ำได้
+// C(10,4) = 210 ชุด × 3 การแบ่งทีม = 630 ครั้งต่อการจับหนึ่งคอร์ต ถูกมาก
+const VARIETY_WINDOW = 10
+
+// เพดานกันคนอดเล่น: ตามหลังคนที่เล่นมากสุดในวงได้ไม่เกินนี้
+// ไม่มีเพดานแล้วคนที่เคยจับคู่กับทุกคนในวงจะโดนข้ามทั้งวัน (จำลอง 8 คน
+// 20 เกม คนนั้นได้เล่น 0 เกม) — 3 เกมถือว่ายอมให้ไม่เท่ากันจริงตามเจตนา
+// ของโหมด แต่ไม่ถึงขั้นมีคนนั่งดูเฉย ๆ ทั้งวัน
+const VARIETY_MAX_AHEAD = 3
 
 export function pairKey(id1, id2) {
   return id1 < id2 ? `${id1}|${id2}` : `${id2}|${id1}`
@@ -64,8 +94,8 @@ function skillGap({ teamA, teamB }) {
   return Math.abs(sumA - sumB) / 100
 }
 
-// ยิ่งคะแนนต่ำยิ่งดี
-function scoreSplit(split, pairStats, queueSkip) {
+// ยิ่งคะแนนต่ำยิ่งดี — w ให้โหมด variety ส่งตารางน้ำหนักของตัวเองเข้ามา
+function scoreSplit(split, pairStats, queueSkip, w = WEIGHT) {
   let together = 0
   let against = 0
 
@@ -81,10 +111,10 @@ function scoreSplit(split, pairStats, queueSkip) {
   }
 
   return (
-    together * WEIGHT.together +
-    against * WEIGHT.against +
-    skillGap(split) * WEIGHT.skillGap +
-    queueSkip * WEIGHT.queueSkip
+    together * w.together +
+    against * w.against +
+    skillGap(split) * w.skillGap +
+    queueSkip * w.queueSkip
   )
 }
 
@@ -128,6 +158,47 @@ function restFirst(sorted) {
   return [...rested, ...tired].slice(0, 4)
 }
 
+/**
+ * เลือกชุดที่คู่ซ้ำน้อยที่สุด โดยไม่สนจำนวนเกมและไม่สนลำดับคิว
+ *
+ * ไม่มีการเทียบแบบลำดับชั้นเหมือน rotate — คะแนนก้อนเดียวตัดสินจบ
+ *
+ * เพดานกันคนอดเล่นทำด้วยการ "บังคับให้ต้องอยู่ในชุด" ไม่ใช่การกรองวงผู้เล่น
+ * เพราะการกรองใช้ไม่ได้: พอเหลือคนตามหลังคนเดียว วงจะเล็กกว่า 4 แล้วต้องผ่อน
+ * กลับไปใช้ทั้งคิว เพดานจึงเลิกบังคับพอดีตอนที่ต้องการมันที่สุด
+ * (จำลองแล้วคนนั้นได้เล่น 0 จาก 20 เกม ต่างกัน 12 เกม)
+ */
+function pickVariety(byGames, pairStats) {
+  // วงคือคนเล่นน้อยสุด VARIETY_WINDOW คน — ต้องจำกัดไว้เพื่อคุมจำนวนชุดที่ลอง
+  // ภายในวงไม่สนลำดับคิวเลย ซึ่งเป็นจุดประสงค์ของโหมดนี้
+  const window = byGames.slice(0, VARIETY_WINDOW)
+  const maxGames = Math.max(...window.map((p) => p.gamesPlayed))
+
+  // ตามหลังเกินเพดาน = ต้องได้ลงรอบนี้ ไม่ว่าคู่จะซ้ำแค่ไหน
+  // (เกิน 4 คนก็เอา 4 คนที่ตามหลังสุด — byGames เรียงคนเล่นน้อยไว้หน้าแล้ว)
+  const forced = window
+    .filter((p) => p.gamesPlayed + VARIETY_MAX_AHEAD < maxGames)
+    .slice(0, 4)
+    .map((p) => p.id)
+
+  let best = null
+  let bestScore = Infinity
+
+  for (const { players } of chooseFour(window)) {
+    if (forced.some((id) => !players.some((p) => p.id === id))) continue
+    for (const split of splitsOf(players)) {
+      // queueSkip = 0 เสมอ น้ำหนักของมันเป็น 0 อยู่แล้ว ส่งไปเพื่อความชัดเจน
+      const score = scoreSplit(split, pairStats, 0, VARIETY_WEIGHT)
+      if (score < bestScore) {
+        bestScore = score
+        best = split
+      }
+    }
+  }
+
+  return best
+}
+
 function splitsOf(four) {
   const [a, b, c, d] = four
   return [
@@ -149,10 +220,16 @@ export function pickNextMatch(waitingPlayers, options = {}) {
 
   const { mode = 'sequential', pairStats = null, forceRest = true } = options
   const byGames = [...waitingPlayers].sort(byFairness)
-  // ปิดบังคับพัก = จำนวนเกมเป็นตัวตัดสินเดียว และมีคนให้เลือกจับคู่มากขึ้น
-  const sorted = forceRest ? restFirst(byGames) : byGames
+  const hasPairs = Boolean(pairStats) && pairStats.size > 0
 
-  if (mode !== 'rotate' || !pairStats || pairStats.size === 0) {
+  // เกมแรกของวันยังไม่มีประวัติคู่ ทุกโหมดที่เลี่ยงคู่ซ้ำจึงถอยไปจับ 4 คนแรก
+  if (mode === 'variety' && hasPairs) return pickVariety(byGames, pairStats)
+
+  // variety ไม่ใช้กติกาพัก แม้ตอนถอยไปทางสำรอง — จะได้ไม่ขัดกับที่บอกผู้ใช้ไว้
+  // ปิดบังคับพัก = จำนวนเกมเป็นตัวตัดสินเดียว และมีคนให้เลือกจับคู่มากขึ้น
+  const sorted = forceRest && mode !== 'variety' ? restFirst(byGames) : byGames
+
+  if (mode !== 'rotate' || !hasPairs) {
     // 2v2 ที่ผลรวมฝีมือสองทีมห่างกันน้อยสุด (เท่ากันเอาแบบแรก)
     return splitsOf(sorted.slice(0, 4)).reduce((best, s) => (skillGap(s) < skillGap(best) ? s : best))
   }

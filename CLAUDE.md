@@ -42,13 +42,18 @@ Auth is email + password (`useAuth`), with a reset-password flow: `onAuthStateCh
 
 `pickNextMatch(waiting, { mode, pairStats, forceRest })` is controlled by **two independent settings**, not one list of modes. `sessions.queue_mode` picks how pairs are chosen and `sessions.force_rest` toggles the rest rule; every combination is valid, so the UI shows two controls rather than three buttons.
 
-**`queue_mode` — does it look at pair history?**
+**`queue_mode` — how are the four picked?**
 - `sequential` — sort by `gamesPlayed` then `queuedAt`, take the first 4, and pick the 2v2 split with the smallest skill-sum gap. Never reads `pairStats`.
 - `rotate` — `fairPool` first drops anyone who has played more games than the 4th-least-played waiting player, then takes the first `ROTATE_WINDOW` (8) of that fair ordering, enumerates every choice of 4 and every 2v2 split, and scores each with the `WEIGHT` table: repeat partners cost most, then repeat opponents, then skill gap, then how far down the queue it reached. Tune by editing `WEIGHT`. Falls back to the `sequential` split whenever `pairStats` is empty.
 
   `rotate` is the default for new days. `sequential` requeues the four who finished together as a group, so with a court-multiple of players (8, 12, 16) the same foursomes — and the same partners — repeat all day; a simulated 12-player day gave everyone a single partner ten times over. `WEIGHT.skillGap` is 4 (was 2): in the same simulations it cut the average team skill gap by about a third without losing partner variety.
 
-**Both settings put games played first.** Neither mode will trade an equal game count for pairing variety — see the lexicographic rule below. There is deliberately no "variety above all" option: that was the original `rotate` and it starved players (a simulated 8-player, 20-game day left one player on 0 games).
+- `variety` — the odd one out: partner freshness is scored on its own (`VARIETY_WEIGHT`, where `together` is 100 and `queueSkip` is 0) and **games played does not enter the comparison at all**, so it will happily reach past the head of the queue for a fresher pairing. It ignores `force_rest` entirely (`IGNORES_FORCE_REST` drives the UI to disable the checkbox rather than let it silently do nothing), because `restFirst` cuts the pool to exactly four and would destroy the only thing this mode exists for. `VARIETY_WINDOW` is 10 rather than 8 since more candidates means fresher pairs; C(10,4) x 3 splits is 630 scorings per court, which is nothing.
+
+  Over 40 simulated games it uses the most distinct partnerships of any setting — 66/66 at 12 players on 2 courts (vs 62 for `rotate` with rest off and 18 with it on), 80/120 at 16p/3c with **zero** repeated pairs — at the cost of a game spread of about 2 instead of 0–1.
+
+  **Its starvation cap is a forced inclusion, not a pool filter, and that distinction is the whole thing.** Anyone more than `VARIETY_MAX_AHEAD` (3) games behind the window maximum is required to be in the chosen four. Filtering the candidate pool by the same threshold looks equivalent and is not: once only one player is behind, the filtered pool falls below four, the code has to widen it back to the whole queue, and the cap stops binding exactly when it is needed. That version was written first and measured — the starved player finished a simulated 20-game day on 0 games, 12 behind. With forced inclusion the same case gives them 7 games and a spread of 4. `npm run check` pins this.
+**Both settings put games played first.** Neither mode will trade an equal game count for pairing variety — see the lexicographic rule below. `variety` is the exception and is described above; its cap is what keeps "variety above all" from starving anyone, which is what the original `rotate` did before commit 956b16a.
 
 **Why `force_rest` is its own column and not a third mode.** It was briefly shipped as `queue_mode = 'fair'` (migration 115, replaced by 116) and that was a mistake: the rest rule applies to both modes, so encoding it in the mode name made two entries differ by something invisible from their labels and left the fourth combination unreachable.
 
