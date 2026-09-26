@@ -277,7 +277,7 @@ create table sessions (
 
   -- วิธีเลือกผู้เล่นลงคอร์ต — logic จริงอยู่ใน src/utils/pairing.js
   queue_mode         text not null default 'sequential'
-                       check (queue_mode in ('sequential', 'rotate')),
+                       check (queue_mode in ('sequential', 'rotate', 'variety')),
   -- บังคับพัก 1 เกมก่อนลงใหม่ — เป็นสวิตช์แยกเพราะใช้ได้กับทั้งสองโหมด
   -- ปิดแล้วมีคนให้เลือกจับคู่มากขึ้น คู่จึงหลากหลายกว่า แต่คนไม่ได้พัก
   force_rest         boolean not null default true,

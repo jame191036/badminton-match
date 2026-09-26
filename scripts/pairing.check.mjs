@@ -77,6 +77,32 @@ assert.equal(promptPayPayload('0812345678'), '00020101021129370016A0000006770101
 assert.equal(promptPayPayload('0812345678', 130), '00020101021229370016A000000677010111011300668123456785802TH53037645406130.00630496CE')
 assert.ok(isPromptPayId('0812345678') && isPromptPayId('1234567890123') && !isPromptPayId('081234567'))
 
+// variety: partner freshness wins outright, so the pair that has played together
+// must be split even when that means reaching past the head of the queue
+const vStats = new Map([
+  [pairKey(1, 2), { together: 5, against: 0 }],
+  [pairKey(3, 4), { together: 5, against: 0 }],
+])
+m = pickNextMatch([P(1, 2), P(2, 2), P(3, 2), P(4, 2)], { mode: 'variety', pairStats: vStats })
+const together = (x, y) => [m.teamA, m.teamB].some((t) => t.some((p) => p.id === x) && t.some((p) => p.id === y))
+assert.ok(!together(1, 2) && !together(3, 4))
+// the force-rest switch must not change anything in this mode
+const varietyIds = (fr) =>
+  ids(pickNextMatch([...tired, ...fresh], { mode: 'variety', pairStats: stats, forceRest: fr }))
+assert.deepEqual(varietyIds(true), varietyIds(false))
+
+// variety must still not starve anyone: a player who has partnered everyone costs a
+// repeat penalty every time, so without a hard cap the weighted score skips them
+// forever (a simulated 8-player, 20-game day left them on 0). The cap is a forced
+// inclusion, NOT a pool filter — filtering stops binding once only one player is
+// behind, because the pool then falls under four and has to be widened again.
+const starved = [
+  { ...P(1, 2, 0) },
+  ...[2, 3, 4, 5, 6, 7, 8].map((i) => P(i, 2, 9)),
+]
+const far = new Map([2, 3, 4, 5, 6, 7, 8].map((i) => [pairKey(1, i), { together: 4, against: 4 }]))
+assert.ok(ids(pickNextMatch(starved, { mode: 'variety', pairStats: far })).includes(1))
+
 // report: a closed day must read the frozen totals, an open day the live ones —
 // the PDF and the PNG share this one model, so a slip here shows up in both
 const REP = {

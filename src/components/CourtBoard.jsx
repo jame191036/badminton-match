@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { QUEUE_MODES, skillLabel, winChance } from '../utils/pairing'
+import { IGNORES_FORCE_REST, QUEUE_MODES, skillLabel, winChance } from '../utils/pairing'
 import AsyncButton from './AsyncButton'
 import { mmss } from '../utils/date'
 import EditableName from './EditableName'
@@ -126,6 +126,7 @@ export default function CourtBoard({
   forceRest,
   onChangeForceRest,
 }) {
+  const ignoresRest = IGNORES_FORCE_REST.includes(queueMode)
   const hasRunning = courts.some((c) => c.match?.status === 'playing')
   const now = useNow(hasRunning)
 
@@ -166,19 +167,24 @@ export default function CourtBoard({
           {QUEUE_MODES.find((m) => m.value === queueMode)?.hint}
         </span>
 
-        {/* สวิตช์แยกจากโหมด เพราะใช้ได้กับทั้งสองโหมด
-            ปิดแล้วมีคนให้เลือกจับคู่มากขึ้น คู่จึงหลากหลายกว่า แต่คนไม่ได้พัก */}
+        {/* สวิตช์แยกจากโหมด เพราะสองโหมดแรกใช้ได้ทั้งคู่
+            ปิดแล้วมีคนให้เลือกจับคู่มากขึ้น คู่จึงหลากหลายกว่า แต่คนไม่ได้พัก
+            โหมดที่ไม่ใช้สวิตช์นี้ให้ปิดช่องติ๊กไว้ ไม่ใช่ปล่อยให้กดแล้วไม่มีผล */}
         <label className="rest-toggle">
           <input
             type="checkbox"
             checked={forceRest}
-            disabled={readOnly}
+            disabled={readOnly || ignoresRest}
             onChange={(e) => onChangeForceRest(e.target.checked)}
           />
           <span>
             บังคับพัก 1 เกมก่อนลงใหม่
             <span className="rest-toggle-hint">
-              {forceRest ? 'คนเพิ่งเล่นจบต้องรออีกเกม' : 'ใครเล่นน้อยสุดได้ลงเลย ไม่ต้องรอ'}
+              {ignoresRest
+                ? 'วิธีจับคู่ที่เลือกไว้ไม่ใช้กติกานี้'
+                : forceRest
+                  ? 'คนเพิ่งเล่นจบต้องรออีกเกม'
+                  : 'ใครเล่นน้อยสุดได้ลงเลย ไม่ต้องรอ'}
             </span>
           </span>
         </label>
