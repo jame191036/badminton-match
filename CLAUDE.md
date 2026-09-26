@@ -140,6 +140,12 @@ Prices live on the day, never on the master row. `venues.default_hourly_rate` ex
 
 Realtime must be enabled for `players`, `courts`, `matches`, `match_players`, `sessions` — the `alter publication supabase_realtime ...` line in `schema.sql` is commented out, so it is done in the dashboard.
 
+**Exporting a day report.** `buildDayReport` in `src/utils/report.js` is the single data model; `DayReport.jsx` renders it as DOM for printing and `reportImage.js` draws the same model onto a canvas as a PNG. Both must show the same numbers, which is why the model is one pure, node-checked function rather than two renderers each doing their own arithmetic — and why it, not the callers, decides that a `done` day reads `final_*` while any other day reads the live `computeBilling` result.
+
+PDF is `window.print()` plus a `@media print` block, deliberately not jsPDF: jsPDF cannot lay out Thai (tone marks land in the wrong place) without an embedded Thai font, which would cost a few hundred KB for a worse result, while the browser already renders the page correctly and keeps the text selectable. The print block hides the whole UI and reveals `.print-only`, and `DayReport` sits outside the tab switch so printing works from any tab — printing the live page would only ever capture whichever tab happens to be open.
+
+The PNG is hand-drawn on a canvas instead of going through html2canvas for two reasons: html2canvas must inline cross-origin CSS and webfonts (ours come from Google Fonts) and silently falls back to the wrong font when that fails, and the image exists to be shared into LINE, so it wants its own light-background layout rather than a screenshot of the dark UI with nav and buttons still in it. `reportImage.js` is the one file in `src/utils/` that cannot run under node, so `npm run check` covers `report.js` only.
+
 ## Note
 
 `README.md` is the user-facing guide: what the app does, how to run a session, the money rules, and setup. Keep it in Thai and keep it free of the internals — this file is where the invariants and reasoning live.

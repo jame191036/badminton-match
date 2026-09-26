@@ -283,6 +283,26 @@ export function useBadmintonData(sessionId, queueMode = 'sequential', forceRest 
     [players, run]
   )
 
+  /**
+   * ส่งคนที่รอคิวอยู่ทั้งหมดไปพัก — ใช้ตอนเปิดวันเพื่อเช็กชื่อทีละคน
+   *
+   * วันที่สร้างก่อน migration 117 ผู้เล่นเริ่มที่ waiting ทั้งหมด ปุ่มนี้คือทาง
+   * แก้ให้วันนั้น ๆ และยังใช้ได้เวลาพักยาวพร้อมกัน เช่นพักกินข้าว
+   *
+   * แตะเฉพาะ waiting — คนที่อยู่ในคอร์ต (playing) ต้องไม่ถูกดึงออกกลางเกม
+   * ส่วน absent คือคนที่ไม่มา ไม่ควรกลับมาโผล่ในแถบพัก
+   */
+  const restAll = useCallback(async () => {
+    if (!sessionId) return
+    await run(
+      supabase
+        .from('players')
+        .update({ status: 'resting' })
+        .eq('session_id', sessionId)
+        .eq('status', 'waiting'),
+    )
+  }, [sessionId, run])
+
   // เช็คชื่อหน้างาน: absent = ลงชื่อไว้แต่ไม่มา ไม่เข้าคิว และไม่ถูกนับเป็นตัวหารค่าใช้จ่าย
   const setAttendance = useCallback(
     async (playerId, present) => {
@@ -419,6 +439,7 @@ export function useBadmintonData(sessionId, queueMode = 'sequential', forceRest 
     removePlayer,
     togglePaying,
     toggleRest,
+    restAll,
     setAttendance,
     addCourt,
     removeCourt,

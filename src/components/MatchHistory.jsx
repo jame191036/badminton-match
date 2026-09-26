@@ -33,6 +33,7 @@ export default function MatchHistory({ history, summary, onSetScore }) {
       )}
 
       <div className="history-item history-head" aria-hidden="true">
+        <span className="history-pos">#</span>
         <span className="history-time">เวลา</span>
         <span className="history-court">คอร์ต</span>
         <span className="history-teams">ผู้เล่น</span>
@@ -41,11 +42,14 @@ export default function MatchHistory({ history, summary, onSetScore }) {
       </div>
 
       <ul className="history-list">
-        {history.map((h) => {
+        {history.map((h, i) => {
           const scored = h.scoreA != null
           const aWon = scored && h.scoreA > h.scoreB
           return (
           <li key={h.id} className="history-item">
+            {/* เลขเกมจริงของวัน ไม่ใช่ตำแหน่งแถว — ลิสต์เรียงใหม่สุดขึ้นก่อนและตัดไว้ 30 แถว
+                ถ้านับ 1..30 จากบนจะอ่านเหมือนเป็นเกมแรก ๆ ของวันทั้งที่เป็นเกมท้าย */}
+            <span className="history-pos mono">{games - i}</span>
             <span className="history-time mono">
               {h.startTime && `${h.startTime}–`}
               {h.time}

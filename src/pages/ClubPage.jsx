@@ -245,7 +245,7 @@ export default function ClubPage() {
  * "เทียบ" (วันไหนจ่ายเยอะ วันไหนคนเยอะ) ซึ่งการ์ดเรียงกันเทียบยาก
  */
 function PastDaysTable({ clubId }) {
-  const { days, loading, error, page, pageCount, total, goTo } = usePastDays(clubId)
+  const { days, loading, error, page, pageCount, total, offset, goTo } = usePastDays(clubId)
 
   if (loading && days.length === 0) return <SkeletonList count={5} lines={1} />
   if (error) return <p className="auth-error">{error}</p>
@@ -259,6 +259,7 @@ function PastDaysTable({ clubId }) {
         <table className="data-table">
           <thead>
             <tr>
+              <th className="is-num">#</th>
               <th>วันที่</th>
               <th>สนาม</th>
               <th>เวลา</th>
@@ -269,8 +270,11 @@ function PastDaysTable({ clubId }) {
             </tr>
           </thead>
           <tbody>
-            {days.map((day) => (
+            {days.map((day, i) => (
               <tr key={day.id} className={day.status === 'cancelled' ? 'is-cancelled' : ''}>
+                {/* นับจากวันแรกที่ก๊วนเล่น ไม่ใช่ตำแหน่งแถว — เลขของวันหนึ่ง ๆ
+                    จะได้ไม่ขยับทุกครั้งที่มีวันเล่นใหม่เพิ่มเข้ามา */}
+                <td className="is-num mono">{total - offset - i}</td>
                 <td>
                   <Link to={`/club/${clubId}/day/${day.id}`} className="table-link">
                     {formatThaiDate(day.playDate)}

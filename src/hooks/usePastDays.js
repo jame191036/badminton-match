@@ -40,5 +40,7 @@ export function usePastDays(clubId) {
     [pageCount],
   )
 
-  return { days, loading, error, page, pageCount, total, goTo }
+  // offset = ลำดับของแถวแรกในหน้านี้ ไว้ให้คอลัมน์ # นับต่อข้ามหน้า
+  // (หน้า 2 ต้องเริ่มที่ 11 ไม่ใช่กลับไปเริ่ม 1 ใหม่)
+  return { days, loading, error, page, pageCount, total, offset: page * PAGE_SIZE, goTo }
 }

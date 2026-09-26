@@ -308,8 +308,14 @@ begin
   end if;
 
   -- ผู้เล่นที่เลือกไว้ล่วงหน้า (snapshot ชื่อ/มือ ณ ตอนนี้)
-  insert into players (session_id, member_id, name, skill)
-  select v_session_id, m.id, m.name, m.default_skill
+  --
+  -- เริ่มที่ resting ไม่ใช่ waiting: ตอนสร้างวันเป็นการ "จองรายชื่อ" คนยังไม่มา
+  -- คนจัดก๊วนกดชื่อทีละคนเข้าคิวเมื่อมาถึง (แถบ "พักอยู่" บนแท็บคอร์ต)
+  -- ถ้าเริ่มที่ waiting ระบบจะจับคนที่ยังไม่มาลงคอร์ตได้
+  --
+  -- ต่างจาก add_player ที่ยังเป็น waiting — คนที่พิมพ์ชื่อเพิ่มหน้างานคือคนที่มาแล้ว
+  insert into players (session_id, member_id, name, skill, status)
+  select v_session_id, m.id, m.name, m.default_skill, 'resting'
   from members m
   where m.owner_id = v_owner_id and m.id = any(p_member_ids)
   on conflict do nothing;

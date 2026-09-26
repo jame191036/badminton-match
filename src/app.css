@@ -556,6 +556,8 @@
   font-size: 0.9rem;
 }
 
+/* คอลัมน์ลำดับ — กว้างคงที่ ตัวเลขจึงเรียงตรงกันทุกแถว รวมถึงเลขสองหลัก */
+.stats-pos { color: var(--text-faintest); width: 22px; flex: none; text-align: right; }
 .stats-name { font-weight: 600; flex: 1; min-width: 0; }
 .stats-skill { font-size: 0.72rem; color: var(--text-faint); }
 
@@ -612,6 +614,7 @@
   flex-wrap: wrap;
 }
 /* ช่วงเวลากว้างขึ้นเพราะแสดงทั้งเวลาเริ่มและเวลาจบ */
+.history-pos { color: var(--text-faintest); width: 22px; flex: none; text-align: right; }
 .history-time { color: var(--text-faintest); width: 96px; flex: none; }
 .history-court { color: var(--court-dark); font-weight: 600; min-width: 70px; }
 .history-teams { flex: 1; }
@@ -2419,3 +2422,117 @@
   .court-grid { grid-template-columns: 1fr; }
   .skeleton-courts { grid-template-columns: 1fr; }
 }
+
+/* ---------- บันทึกรายงาน (PDF / รูป) ---------- */
+.export-report {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.export-report .btn-ghost { display: inline-flex; align-items: center; gap: 6px; }
+.export-hint { font-size: 0.78rem; color: var(--text-faintest); }
+.export-error { color: var(--coral); }
+
+/* รายงานสำหรับ print — ซ่อนบนจอเสมอ ไปโผล่ใน @media print ท้ายไฟล์ */
+.print-only { display: none; }
+
+/* ---------- พิมพ์ / บันทึกเป็น PDF ---------- */
+@media print {
+  /* บังคับพื้นขาวตัวอักษรดำ ไม่ว่าผู้ใช้จะเปิดธีมมืดอยู่หรือไม่
+     ธีมมืดบนกระดาษ = เปลืองหมึกและอ่านไม่ออก */
+  :root, :root[data-theme='dark'] {
+    --surface: #fff;
+    --text: #000;
+  }
+
+  /* ซ่อนทุกอย่างที่เป็นส่วนติดต่อผู้ใช้ เหลือแต่รายงาน */
+  .app-bar,
+  .tab-bar,
+  .back-link,
+  .page-head-actions,
+  .export-report,
+  .toast-error,
+  .panel,
+  .net-divider {
+    display: none !important;
+  }
+
+  .print-only { display: block !important; }
+
+  html, body, .app-shell {
+    background: #fff;
+    color: #000;
+    margin: 0;
+    padding: 0;
+    max-width: none;
+  }
+
+  @page { margin: 14mm; }
+}
+
+/* ---------- รายงาน (เห็นเฉพาะบนกระดาษ) ---------- */
+.day-report { color: #000; font-size: 11pt; }
+
+.report-head h1 {
+  margin: 0;
+  font-size: 20pt;
+  font-family: 'Kanit', 'IBM Plex Sans Thai', sans-serif;
+}
+
+.report-when { margin: 4px 0 0; font-size: 12pt; }
+.report-place { margin: 2px 0 0; color: #444; }
+
+.report-tiles {
+  display: flex;
+  gap: 10mm;
+  margin: 8mm 0 6mm;
+  padding: 4mm 0;
+  border-top: 1px solid #000;
+  border-bottom: 1px solid #000;
+}
+
+.report-tile { display: flex; flex-direction: column; gap: 2px; }
+.report-tile-value { font-size: 16pt; font-weight: 700; }
+.report-tile-label { font-size: 9pt; color: #444; }
+
+.report-table { width: 100%; border-collapse: collapse; }
+
+.report-table th {
+  text-align: left;
+  font-size: 9pt;
+  color: #444;
+  border-bottom: 1px solid #000;
+  padding: 2mm 3mm 2mm 0;
+}
+
+.report-table td {
+  padding: 1.8mm 3mm 1.8mm 0;
+  border-bottom: 1px solid #ddd;
+}
+
+.report-table .is-num { text-align: right; padding-right: 0; }
+
+/* ตารางยาวกว่าหนึ่งหน้า: ห้ามตัดกลางแถว และให้หัวตารางซ้ำทุกหน้า */
+.report-table tr { break-inside: avoid; }
+.report-table thead { display: table-header-group; }
+
+.report-notes {
+  margin: 6mm 0 0;
+  padding-left: 5mm;
+  font-size: 9.5pt;
+  color: #333;
+}
+
+/* แถบเช็กชื่อ — อยู่เหนือแถบพักบนแท็บคอร์ต */
+.checkin-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.checkin-hint { font-size: 0.78rem; color: var(--text-faintest); }
