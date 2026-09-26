@@ -3,6 +3,7 @@ import { pickNextMatch, pairKey, winChance, skillRating } from '../src/utils/pai
 import { byRanking } from '../src/utils/ranking.js'
 import { computeBilling, groupOutstanding, dayPaymentText, outstandingText } from '../src/utils/billing.js'
 import { promptPayPayload, crc16, isPromptPayId } from '../src/utils/promptpay.js'
+import { buildDayReport, reportColumns } from '../src/utils/report.js'
 const P = (id, skill, g = 0) => ({ id, skill, gamesPlayed: g, queuedAt: id })
 const sum = (t) => t.reduce((s, p) => s + p.skill, 0)
 // sequential: balanced split of first 4 (3+1 vs 2+2 -> gap 0)
@@ -75,5 +76,38 @@ assert.equal(crc16('123456789'), '29B1')
 assert.equal(promptPayPayload('0812345678'), '00020101021129370016A000000677010111011300668123456785802TH530376463045D82')
 assert.equal(promptPayPayload('0812345678', 130), '00020101021229370016A000000677010111011300668123456785802TH53037645406130.00630496CE')
 assert.ok(isPromptPayId('0812345678') && isPromptPayId('1234567890123') && !isPromptPayId('081234567'))
+
+// report: a closed day must read the frozen totals, an open day the live ones —
+// the PDF and the PNG share this one model, so a slip here shows up in both
+const REP = {
+  players: [
+    { name: 'Ae', status: 'waiting', gamesPlayed: 5, minutesPlayed: 60, wins: 3, losses: 1, pointDiff: 9 },
+    { name: 'Bee', status: 'waiting', gamesPlayed: 2, minutesPlayed: 20, wins: 0, losses: 0, pointDiff: 0 },
+    { name: 'Cee', status: 'absent', gamesPlayed: 0, minutesPlayed: 0, wins: 0, losses: 0, pointDiff: 0 },
+  ],
+  summary: { finishedGames: 7, totalPlayMinutes: 80 },
+  billing: { total: 999, perPerson: 499.5, payerCount: 2 },
+  clubName: 'ก๊วนทดสอบ',
+}
+const openDay = { playDate: '2026-09-26', status: 'playing', startTime: '19:00:00', endTime: '21:00:00', venueName: 'สนาม A', finals: {} }
+const frozen = { totalFee: 500, perPerson: 250, payerCount: 2 }
+
+let rep = buildDayReport({ ...REP, day: openDay })
+assert.equal(rep.tiles[2].value, '999 บาท') // ยังไม่จบ = ยอดสด
+assert.deepEqual(rep.rows.map((r) => r.name), ['Ae', 'Bee']) // absent ไม่อยู่ในรายงาน
+assert.deepEqual(rep.rows.map((r) => r.pos), [1, 2])
+assert.ok(rep.notes.some((n) => n.includes('ไม่มา')) && rep.notes.some((n) => n.includes('ยังไม่จบ')))
+
+rep = buildDayReport({ ...REP, day: { ...openDay, status: 'done', finals: frozen } })
+assert.equal(rep.tiles[2].value, '500 บาท') // จบแล้ว = ยอดที่ freeze ไว้
+assert.equal(rep.tiles[3].value, '250 บาท')
+assert.ok(!rep.notes.some((n) => n.includes('ยังไม่จบ')))
+// ไม่มีใครจดแต้ม -> ไม่ต้องมีคอลัมน์ชนะ-แพ้
+assert.ok(!reportColumns(buildDayReport({
+  ...REP,
+  players: REP.players.map((p) => ({ ...p, wins: 0, losses: 0 })),
+  day: openDay,
+}).hasScores).some((c) => c.key === 'record'))
+assert.ok(reportColumns(true).some((c) => c.key === 'record'))
 
 console.log('pairing ok')

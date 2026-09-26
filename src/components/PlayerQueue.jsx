@@ -71,7 +71,7 @@ export default function PlayerQueue({
                 <span className={`skill-badge skill-${p.skill}`}>{skillLabel(p.skill)}</span>
                 {!readOnly && (
                   <>
-                    <AsyncButton onClick={() => onToggleRest(p.id)}>กลับเข้าคิว</AsyncButton>
+                    <AsyncButton onClick={() => onToggleRest(p.id)}>เข้าคิว</AsyncButton>
                     <AsyncButton className="btn-ghost btn-danger" onClick={() => onRemove(p.id)}>ลบ</AsyncButton>
                   </>
                 )}

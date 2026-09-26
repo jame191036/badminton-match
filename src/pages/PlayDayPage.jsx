@@ -11,6 +11,9 @@ import MatchHistory from '../components/MatchHistory'
 import SessionStats from '../components/SessionStats'
 import BillingPanel from '../components/BillingPanel'
 import PaymentPanel from '../components/PaymentPanel'
+import DayReport from '../components/DayReport'
+import ExportReport from '../components/ExportReport'
+import { buildDayReport } from '../utils/report'
 import { useClubOutstanding } from '../hooks/useClubOutstanding'
 import { computeBilling, isPayer } from '../utils/billing'
 import { SkeletonCourts, SkeletonHead, SkeletonQueue } from '../components/Skeleton'
@@ -80,6 +83,7 @@ export default function PlayDayPage() {
     removePlayer,
     togglePaying,
     toggleRest,
+    restAll,
     setAttendance,
     addCourt,
     removeCourt,
@@ -196,6 +200,15 @@ export default function PlayDayPage() {
 
   const timeRange = [clock(day.startTime), clock(day.endTime)].filter(Boolean).join('–')
   const plannedHours = hoursBetween(clock(day.startTime), clock(day.endTime))
+
+  // ข้อมูลรายงานชุดเดียว ใช้ทั้งปุ่มบันทึกรูปและตัวที่ print ออกมาเป็น PDF
+  const report = buildDayReport({
+    day,
+    players,
+    summary,
+    billing: live,
+    clubName: clubInfo?.name,
+  })
 
   return (
     <>
@@ -382,6 +395,17 @@ export default function PlayDayPage() {
               {/* คนที่ติดพักอยู่ ต้องเห็นจากหน้าคอร์ตด้วย ไม่ใช่เฉพาะแท็บผู้เล่น
                   เพราะการสลับตัวจะดันคนออกมาพักโดยอัตโนมัติ ถ้าไม่มีอะไรเตือน
                   เขาจะค้างอยู่ตรงนั้นทั้งวันโดยไม่มีใครสังเกต */}
+              {canEdit && waitingCount > 0 && (
+                <div className="checkin-bar">
+                  <AsyncButton onClick={restAll} busyLabel="กำลังพัก...">
+                    พักทุกคน ({waitingCount})
+                  </AsyncButton>
+                  <span className="checkin-hint">
+                    ส่งทุกคนไปพักเพื่อเช็กชื่อ แล้วกดชื่อคนที่มาถึงให้เข้าคิว
+                  </span>
+                </div>
+              )}
+
               {resting.length > 0 && (
                 <div className="resting-strip">
                   <span className="resting-strip-label">พักอยู่ {resting.length} คน</span>
@@ -390,14 +414,14 @@ export default function PlayDayPage() {
                       key={p.id}
                       className="resting-chip"
                       disabled={!canEdit}
-                      title={canEdit ? `ให้ ${p.name} กลับเข้าคิว` : undefined}
+                      title={canEdit ? `ให้ ${p.name} เข้าคิว` : undefined}
                       onClick={() => toggleRest(p.id)}
                     >
                       {p.name}
                       {canEdit && <span aria-hidden="true">↩</span>}
                     </AsyncButton>
                   ))}
-                  {canEdit && <span className="resting-strip-hint">กดชื่อเพื่อให้กลับเข้าคิว</span>}
+                  {canEdit && <span className="resting-strip-hint">กดชื่อคนที่มาแล้วเพื่อเข้าคิว</span>}
                 </div>
               )}
               {boardLoading ? (
@@ -469,6 +493,7 @@ export default function PlayDayPage() {
             <section className="panel">
               {/* "วันนี้" ใช้ไม่ได้กับวันที่จบไปแล้ว มันเป็นวันอื่นในอดีต */}
               <h2>{isClosed ? 'สถิติของวันเล่นนี้' : 'สถิติวันนี้'}</h2>
+              <ExportReport report={report} />
               <SessionStats players={players} summary={summary} />
             </section>
           )}
@@ -507,6 +532,9 @@ export default function PlayDayPage() {
           )}
         </>
       )}
+
+      {/* ซ่อนบนจอ โผล่เฉพาะตอน print — อยู่นอกแท็บเพื่อให้สั่งพิมพ์จากแท็บไหนก็ได้ */}
+      <DayReport report={report} />
     </>
   )
 }
