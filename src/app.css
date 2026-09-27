@@ -1693,72 +1693,99 @@
 .quick-chip:hover .quick-chip-sub { color: inherit; }
 .quick-chip.is-on .quick-chip-sub { color: rgba(255, 255, 255, 0.8); }
 
-/* ---------- ส่วนของฟอร์มที่พับเก็บได้ ---------- */
-/* ห้ามใส่ overflow: hidden ตรงนี้ — ปฏิทินกับ dropdown ข้างในเป็น
-   position: absolute จะถูกตัดหายไปทั้งหมด (ใช้ border-radius ที่หัวข้อ
-   แทนเพื่อไม่ให้สีตอน hover ล้นมุมโค้ง) */
-.form-section {
+/* ---------- ฟอร์มแบบขั้นตอน (หน้าสร้าง/แก้ไขวันเล่น) ---------- */
+/* แถบขั้นตอน: ทุกขั้นกดได้ และโชว์สรุปค่าไว้ใต้ชื่อตลอด */
+.step-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.step-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  height: 100%;
+  padding: 10px 12px;
   border: 1.5px solid var(--border-muted);
   border-radius: 12px;
   background: var(--surface);
-}
-
-.form-section.is-open { border-color: var(--border); }
-
-.form-section-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-height: 56px;
-  padding: 12px 14px;
-  /* โค้งตามมุมกล่องแม่ เพราะกล่องแม่ตัดเนื้อหาส่วนเกินไม่ได้แล้ว */
-  border-radius: 11px 11px 0 0;
-  background: transparent;
   color: var(--text);
   text-align: left;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
-/* ตอนพับอยู่ หัวข้อคือทั้งกล่อง ต้องโค้งครบสี่มุม */
-.form-section:not(.is-open) .form-section-head { border-radius: 11px; }
+.step-item:hover { background: var(--surface-muted); }
 
-.form-section-head:hover { background: var(--surface-muted); }
+.step-item.is-active {
+  border-color: var(--court);
+  background: var(--surface-muted);
+}
 
-.form-section-icon { flex: none; color: var(--court); }
-
-.form-section-title {
-  font-weight: 600;
-  font-size: 0.95rem;
+.step-num {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--border-muted);
+  color: var(--text-faint);
+  font-size: 0.8rem;
+  font-weight: 600;
 }
 
-/* สรุปกินพื้นที่ที่เหลือ ยาวเกินก็ตัดด้วย ... ไม่ดันปุ่มตกบรรทัด */
-.form-section-summary {
-  flex: 1;
-  min-width: 0;
-  font-size: 0.85rem;
+.step-item.is-active .step-num { background: var(--court); color: #fff; }
+
+.step-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.step-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+/* ไอคอนเดิมของหัวข้อส่วน ใช้ต่อในแถบขั้นตอน */
+.form-section-icon { flex: none; color: var(--court); width: 16px; height: 16px; }
+
+/* สรุปยาวเกินก็ตัดด้วย ... ไม่ให้ดันกล่องสูงไม่เท่ากัน */
+.step-summary {
+  font-size: 0.78rem;
   color: var(--text-faint);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.form-section-action {
-  flex: none;
-  margin-left: auto;
-  padding: 5px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: var(--court);
-}
-
-.form-section-body {
+/* ห้ามใส่ overflow: hidden ตรงนี้ — ปฏิทินกับ dropdown ข้างในเป็น
+   position: absolute จะถูกตัดหายไปทั้งหมด */
+.step-body {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 4px 14px 16px;
+  padding: 16px;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+/* ยกเลิกชิดขวา แยกจากปุ่มเดินหน้า/ถอยหลัง กันกดพลาด */
+.step-actions .step-cancel { margin-left: auto; }
+
+/* มือถือ: เหลือแต่เลขกับชื่อขั้น สรุปกินที่เกิน */
+@media (max-width: 560px) {
+  .step-bar { gap: 6px; }
+  .step-item { flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; text-align: center; }
+  .step-title { font-size: 0.75rem; }
+  .step-title .form-section-icon,
+  .step-summary { display: none; }
 }
 
 .form-grid {
