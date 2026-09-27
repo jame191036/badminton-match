@@ -57,13 +57,8 @@ export default function NewPlayDayForm({
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
-  /**
-   * กางทุกส่วนไว้ตั้งแต่แรก — ฟอร์มนี้อยู่บนหน้าของตัวเองแล้ว ความยาวไม่ได้
-   * ไปแย่งที่กับอะไร และการเห็นค่าที่ลอกมาจริง ๆ ตรวจง่ายกว่าเห็นแค่สรุป
-   * ยังพับเก็บได้อยู่ถ้าอยากซ่อนส่วนที่ไม่แตะ
-   */
-  const [open, setOpen] = useState({ when: true, where: true, who: true, gear: true })
-  const toggle = (key) => setOpen((prev) => ({ ...prev, [key]: !prev[key] }))
+  // ขั้นตอนที่เปิดอยู่ (ดู steps ด้านล่าง) — กดข้ามไปขั้นไหนก็ได้ ไม่บังคับเดินทีละขั้น
+  const [current, setCurrent] = useState('when')
 
   // prefill จากวันล่าสุดของก๊วนนี้ — เคสปกติคือ "เหมือนเดิมทุกอย่าง" กดยืนยันได้เลย
   useEffect(() => {
@@ -120,7 +115,7 @@ export default function NewPlayDayForm({
   }
 
   async function handleSubmit(e) {
-    e.preventDefault()
+    e?.preventDefault()
     setError('')
 
     const cleanCourts = courts
@@ -129,18 +124,18 @@ export default function NewPlayDayForm({
         hours: Number(c.hours) || 0,
       }))
 
-    // required บน input ใช้ไม่ได้ถ้าส่วนนั้นถูกพับอยู่ เพราะ FormSection
-    // ถอด children ออกจาก DOM ไปเลย เบราว์เซอร์จึงไม่เห็นช่องที่ต้องตรวจ
+    // required บน input ใช้ไม่ได้ เพราะขั้นที่ไม่ได้เปิดอยู่ไม่มีใน DOM เลย
+    // เบราว์เซอร์จึงไม่เห็นช่องที่ต้องตรวจ — ตรวจเองแล้วพาไปขั้นที่ผิด
     if (!playDate) {
       setError('ต้องเลือกวันที่')
-      setOpen((prev) => ({ ...prev, when: true }))
+      setCurrent('when')
       return
     }
 
     if (cleanCourts.length === 0) {
       setError('ต้องมีอย่างน้อยหนึ่งคอร์ต')
-      // กางส่วนที่ผิดให้เอง ไม่งั้นจะเห็นข้อความ error แต่หาช่องที่ต้องแก้ไม่เจอ
-      setOpen((prev) => ({ ...prev, where: true }))
+      // พาไปขั้นที่ผิดให้เอง ไม่งั้นจะเห็นข้อความ error แต่หาช่องที่ต้องแก้ไม่เจอ
+      setCurrent('where')
       return
     }
 
@@ -240,15 +235,48 @@ export default function NewPlayDayForm({
     .filter(Boolean)
     .join(' · ')
 
+  /**
+   * ขั้นตอนของฟอร์ม — summary โชว์ใต้ชื่อในแถบด้านบนตลอด จะได้เห็นค่าที่ลอก
+   * มาครบทุกขั้นโดยไม่ต้องกดเข้าไปดูทีละขั้น
+   * โหมดแก้ไขไม่มีขั้นผู้เล่น (รายชื่อของวันที่สร้างแล้วจัดการที่หน้าวันเล่น)
+   */
+  const steps = [
+    {
+      key: 'when',
+      title: 'วันและเวลา',
+      icon: <CalendarDays {...ICON} />,
+      summary: [dateLabel, timeLabel].filter(Boolean).join(' · '),
+    },
+    { key: 'where', title: 'สนามและคอร์ต', icon: <MapPin {...ICON} />, summary: whereSummary },
+    ...(initial
+      ? []
+      : [
+          {
+            key: 'who',
+            title: 'ผู้เล่น',
+            icon: <Users {...ICON} />,
+            summary: selected.size > 0 ? `${selected.size} คน` : 'ยังไม่ได้เลือกใคร',
+          },
+        ]),
+    { key: 'gear', title: 'ลูกแบดและราคา', icon: <Feather {...ICON} />, summary: gearSummary },
+  ]
+  const index = steps.findIndex((st) => st.key === current)
+  const isLast = index === steps.length - 1
+  const go = (i) => setCurrent(steps[Math.min(Math.max(i, 0), steps.length - 1)].key)
+
   return (
-    <form className="day-form" onSubmit={handleSubmit}>
-      <FormSection
-        icon={<CalendarDays {...ICON} />}
-        title="วันและเวลา"
-        summary={[dateLabel, timeLabel].filter(Boolean).join(' · ')}
-        open={open.when}
-        onToggle={() => toggle('when')}
-      >
+    // Enter ในช่องกรอก = ไปขั้นถัดไป ไม่ใช่สร้างวันเล่นทันทีโดยไม่ตั้งใจ
+    // ขั้นสุดท้ายถึงจะส่งจริง
+    <form
+      className="day-form"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (isLast) handleSubmit()
+        else go(index + 1)
+      }}
+    >
+      <StepBar steps={steps} current={current} onPick={setCurrent} />
+      <Step active={current === 'when'}>
         <div className="quick-picks">
           {weekChips.map((c) => (
             <button
@@ -307,15 +335,9 @@ export default function NewPlayDayForm({
             <input type="time" value={endTime} onChange={(e) => setTimes(startTime, e.target.value)} />
           </label>
         </div>
-      </FormSection>
+      </Step>
 
-      <FormSection
-        icon={<MapPin {...ICON} />}
-        title="สนามและคอร์ต"
-        summary={whereSummary}
-        open={open.where}
-        onToggle={() => toggle('where')}
-      >
+      <Step active={current === 'where'}>
         <div className="field">
           <span className="field-label">สนาม</span>
           <SearchSelect
@@ -370,22 +392,12 @@ export default function NewPlayDayForm({
             + เพิ่มคอร์ต
           </button>
         </fieldset>
-      </FormSection>
+      </Step>
 
       {/* โหมดแก้ไขไม่มีส่วนนี้ — รายชื่อของวันที่สร้างแล้วจัดการที่หน้าวันเล่น
           (เพิ่ม/พัก/ไม่มา) การให้แก้สองที่จะงงว่าอันไหนคือของจริง */}
       {!initial && (
-      <FormSection
-        icon={<Users {...ICON} />}
-        title="ผู้เล่น"
-        // ป้ายนี้เห็นตลอดทั้งตอนพับและตอนกาง ต่างจาก summary ที่โผล่เฉพาะตอนพับ
-        // — จำนวนคนที่เลือกต้องเห็นได้ "ระหว่าง" กำลังเลือกด้วย ไม่งั้นไม่รู้ว่าครบยัง
-        // (ตัวเลขในช่องค้นหาเป็นจำนวนที่ค้นเจอ ไม่ใช่จำนวนที่เลือก)
-        badge={selected.size > 0 ? `${selected.size} คน` : null}
-        summary={selected.size > 0 ? `${selected.size} คน` : 'ยังไม่ได้เลือกใคร'}
-        open={open.who}
-        onToggle={() => toggle('who')}
-      >
+      <Step active={current === 'who'}>
         <p className="panel-hint">
           เลือกไว้ก่อนได้ ใครไม่มาค่อยกด &ldquo;ไม่มา&rdquo; หน้างาน และเพิ่มแขกเพิ่มได้ตลอด
         </p>
@@ -442,16 +454,10 @@ export default function NewPlayDayForm({
             )}
           </>
         )}
-      </FormSection>
+      </Step>
       )}
 
-      <FormSection
-        icon={<Feather {...ICON} />}
-        title="ลูกแบดและราคา"
-        summary={gearSummary}
-        open={open.gear}
-        onToggle={() => toggle('gear')}
-      >
+      <Step active={current === 'gear'}>
       <div className="form-grid">
         <div className="field">
           <span className="field-label">ยี่ห้อลูกแบด</span>
@@ -553,15 +559,32 @@ export default function NewPlayDayForm({
             </span>
           </span>
         </label>
-      </FormSection>
+      </Step>
 
       {error && <p className="auth-error">{error}</p>}
 
-      <div className="form-actions">
-        <button className="btn-primary" type="submit" disabled={busy}>
-          {busy ? 'กำลังบันทึก...' : submitLabel}
-        </button>
-        <button className="btn-ghost" type="button" onClick={onCancel}>
+      <div className="form-actions step-actions">
+        {index > 0 && (
+          <button className="btn-ghost" type="button" onClick={() => go(index - 1)}>
+            ← ย้อนกลับ
+          </button>
+        )}
+        {isLast ? (
+          <button className="btn-primary" type="submit" disabled={busy}>
+            {busy ? 'กำลังบันทึก...' : submitLabel}
+          </button>
+        ) : (
+          <>
+            <button className="btn-primary" type="submit">
+              ถัดไป →
+            </button>
+            {/* ค่าส่วนใหญ่ลอกมาจากวันก่อนแล้ว เคสปกติไม่ต้องเดินครบทุกขั้น */}
+            <button className="btn-ghost" type="button" disabled={busy} onClick={() => handleSubmit()}>
+              {busy ? 'กำลังบันทึก...' : `${submitLabel}เลย`}
+            </button>
+          </>
+        )}
+        <button className="btn-ghost step-cancel" type="button" onClick={onCancel}>
           ยกเลิก
         </button>
       </div>
@@ -570,27 +593,42 @@ export default function NewPlayDayForm({
 }
 
 /**
- * ส่วนของฟอร์มที่พับเก็บได้ ตอนพับจะโชว์สรุปบรรทัดเดียวแทน
+ * แถบขั้นตอนด้านบน — กดข้ามไปขั้นไหนก็ได้ และโชว์สรุปค่าของทุกขั้นไว้ตลอด
  *
- * ไม่ใช้ <details>/<summary> ของ HTML เพราะต้องคุมสถานะเปิด-ปิดจากข้างนอกด้วย
- * (พับทั้งหมดตอนลอกค่ามาได้ และกางส่วนที่กรอกผิดตอนกดส่ง)
+ * ไม่บังคับเดินทีละขั้นเพราะฟอร์มนี้ลอกค่ามาจากวันก่อนเกือบหมด คนส่วนใหญ่
+ * แค่อยากเข้าไปแก้ขั้นเดียว (เช่นวันที่) แล้วสร้างเลย
  */
-function FormSection({ icon, title, summary, badge, open, onToggle, children }) {
+function StepBar({ steps, current, onPick }) {
   return (
-    <div className={`form-section${open ? ' is-open' : ''}`}>
-      <button
-        type="button"
-        className="form-section-head"
-        onClick={onToggle}
-        aria-expanded={open}
-      >
-        {icon}
-        <span className="form-section-title">{title}</span>
-        {badge && <span className="tab-count mono">{badge}</span>}
-        {!open && <span className="form-section-summary">{summary}</span>}
-        <span className="form-section-action">{open ? 'ย่อ' : 'แก้'}</span>
-      </button>
-      {open && <div className="form-section-body">{children}</div>}
-    </div>
+    <ol className="step-bar">
+      {steps.map((st, i) => (
+        <li key={st.key}>
+          <button
+            type="button"
+            className={`step-item${st.key === current ? ' is-active' : ''}`}
+            aria-current={st.key === current ? 'step' : undefined}
+            onClick={() => onPick(st.key)}
+          >
+            <span className="step-num mono">{i + 1}</span>
+            <span className="step-text">
+              <span className="step-title">
+                {st.icon}
+                {st.title}
+              </span>
+              <span className="step-summary">{st.summary}</span>
+            </span>
+          </button>
+        </li>
+      ))}
+    </ol>
   )
+}
+
+/**
+ * เนื้อหาของหนึ่งขั้น — ไม่ได้ render ขั้นที่ไม่ได้เปิดเลย ค่าที่กรอกไม่หาย
+ * เพราะ state ทั้งหมดอยู่ใน NewPlayDayForm ไม่ได้อยู่ในตัวขั้น
+ */
+function Step({ active, children }) {
+  if (!active) return null
+  return <div className="step-body">{children}</div>
 }
