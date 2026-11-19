@@ -75,6 +75,7 @@ export default function PlayDayPage() {
     courts,
     history,
     summary,
+    repeatGroup,
     loading: boardLoading,
     actionError,
     clearActionError,
@@ -95,7 +96,6 @@ export default function PlayDayPage() {
     fillMatch,
     cancelMatch,
     finishMatch,
-    setMatchScore,
   } = useBadmintonData(sessionId, day?.queueMode ?? 'sequential', day?.forceRest ?? true)
 
   const [headError, setHeadError] = useState('')
@@ -432,6 +432,7 @@ export default function PlayDayPage() {
                   readOnly={!canEdit}
                   live={isLive}
                   waitingCount={waitingCount}
+                  repeatGroup={repeatGroup}
                   queueMode={day.queueMode}
                   onChangeQueueMode={updateQueueMode}
                   forceRest={day.forceRest}
@@ -522,12 +523,7 @@ export default function PlayDayPage() {
           {activeTab === 'history' && (
             <section className="panel">
               <h2>ประวัติการแข่งขัน</h2>
-              <MatchHistory
-                history={history}
-                summary={summary}
-                // แก้แต้มย้อนหลังได้เฉพาะระหว่างวัน — DB บังคับอีกชั้น (set_match_score)
-                onSetScore={canEdit && isLive ? setMatchScore : undefined}
-              />
+              <MatchHistory history={history} summary={summary} />
             </section>
           )}
         </>

@@ -1,6 +1,5 @@
 import { formatBaht } from './billing.js'
 import { formatMinutes, clock, thaiFullDate } from './date.js'
-import { byRanking, scoredGames } from './ranking.js'
 
 /**
  * ข้อมูลรายงานสรุปวันเล่น — ชั้นกลางที่ใช้ร่วมกันสองทาง
@@ -25,15 +24,13 @@ export function buildDayReport({ day, players, summary, billing, clubName }) {
   const timeRange = [clock(day.startTime), clock(day.endTime)].filter(Boolean).join('–')
   const place = [day.venueName, day.shuttleBrandName].filter(Boolean).join(' · ')
 
-  // มีเกมที่จดแต้มแล้วค่อยเรียงตามอันดับ ไม่งั้นเรียงตามคนเล่นเยอะสุด
-  const hasScores = present.some((p) => scoredGames(p) > 0)
+  // คนเล่นเยอะสุดขึ้นก่อน — ลำดับเดียวกับแท็บสถิติ
   const rows = [...present]
-    .sort(hasScores ? byRanking : (a, b) => b.gamesPlayed - a.gamesPlayed)
+    .sort((a, b) => b.gamesPlayed - a.gamesPlayed)
     .map((p, i) => ({
       pos: i + 1,
       name: p.name,
       games: p.gamesPlayed,
-      record: hasScores && scoredGames(p) > 0 ? `${p.wins}–${p.losses}` : '—',
       minutes: p.minutesPlayed > 0 ? formatMinutes(p.minutesPlayed) : '—',
       paid: closed ? Boolean(p.paidAt) : null,
     }))
@@ -44,7 +41,6 @@ export function buildDayReport({ day, players, summary, billing, clubName }) {
     place: place || 'ไม่ระบุสนาม',
     timeLabel: timeRange || 'ไม่ระบุเวลา',
     closed,
-    hasScores,
     tiles: [
       { label: 'เกมที่เล่น', value: String(summary?.finishedGames ?? 0) },
       { label: 'ผู้เล่น', value: `${present.length} คน` },
@@ -63,12 +59,11 @@ export function buildDayReport({ day, players, summary, billing, clubName }) {
 }
 
 /** หัวคอลัมน์ของตารางในรายงาน — ใช้ร่วมกันทั้ง print และรูป */
-export function reportColumns(hasScores) {
+export function reportColumns() {
   return [
     { key: 'pos', label: '#', width: 34, align: 'right' },
     { key: 'name', label: 'ชื่อ', width: 0, align: 'left' }, // 0 = ยืดเต็มที่เหลือ
     { key: 'games', label: 'เกม', width: 56, align: 'right' },
-    ...(hasScores ? [{ key: 'record', label: 'ชนะ–แพ้', width: 80, align: 'right' }] : []),
     { key: 'minutes', label: 'เวลา', width: 88, align: 'right' },
   ]
 }

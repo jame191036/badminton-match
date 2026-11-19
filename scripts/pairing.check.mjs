@@ -1,6 +1,5 @@
 import assert from 'node:assert'
-import { pickNextMatch, pairKey, winChance, skillRating } from '../src/utils/pairing.js'
-import { byRanking } from '../src/utils/ranking.js'
+import { pickNextMatch, pairKey, repeatGroupReason } from '../src/utils/pairing.js'
 import { computeBilling, groupOutstanding, dayPaymentText, outstandingText } from '../src/utils/billing.js'
 import { promptPayPayload, crc16, isPromptPayId } from '../src/utils/promptpay.js'
 import { buildDayReport, reportColumns } from '../src/utils/report.js'
@@ -41,18 +40,64 @@ m = pickNextMatch([P(1, 2), P(2, 2), P(3, 2), P(4, 2)], {
   forceRest: false,
 })
 assert.ok(!m.teamA.some((p) => p.id === 1) || !m.teamA.some((p) => p.id === 2))
-// rating beats skill label: two "intermediates" rated like aces split across teams
-const rated = [P(1, 2), P(2, 2), { ...P(3, 2), rating: 1300 }, { ...P(4, 2), rating: 1300 }]
-m = pickNextMatch(rated)
-assert.ok(m.teamA.some((p) => p.id >= 3) && m.teamB.some((p) => p.id >= 3))
-assert.ok(Math.abs(winChance(m.teamA, m.teamB) - 0.5) < 1e-9)
-assert.equal(skillRating(3), 1100)
 
-// ranking: 8-2 beats 1-0 (below min games), win rate beats raw wins, point diff breaks ties
-const R = (name, wins, losses, pointDiff = 0) => ({ name, wins, losses, pointDiff })
-const order = [R('lucky', 1, 0), R('grinder', 6, 4), R('ace', 8, 2), R('twin+', 3, 1, 12), R('twin-', 3, 1, 5)]
-  .sort(byRanking).map((r) => r.name)
-assert.deepEqual(order, ['ace', 'twin+', 'twin-', 'grinder', 'lucky'])
+// rest rule, filling from the four who just finished the SAME game: they rested exactly
+// as long as each other, so queue order between them is meaningless (finish_match hands
+// out queue_seq in table-row order, the same order every time). Breaking that tie by
+// queuedAt sent the same two people straight back on every game — simulated 10 players
+// on 2 courts: 11 games vs 6, and those two shared every court. Fewer games must win the
+// tie instead (1,2 have 6 games, 3,4 have 5 — queue order alone would take 1,2).
+const R1 = { ...P(21, 2, 5) }
+const R2 = { ...P(22, 2, 5) }
+const sameGame = (id, g) => ({ ...P(id, 2, g), queuedAt: 10 + id, rested: false, lastEndedAt: 100 })
+const justDone = [sameGame(1, 6), sameGame(2, 6), sameGame(3, 5), sameGame(4, 5)]
+for (const mode of ['sequential', 'rotate']) {
+  assert.deepEqual(ids(pickNextMatch([R1, R2, ...justDone], { mode, pairStats: stats })), [3, 4, 21, 22])
+}
+// ...and with games equal, rotate picks from the tie by pair freshness: 1 and 2 have
+// already partnered both rested players, so 3 and 4 go even though they queue later
+const evenDone = [1, 2, 3, 4].map((i) => sameGame(i, 5))
+const stale = new Map([1, 2].flatMap((i) => [21, 22].map((r) => [pairKey(i, r), { together: 2, against: 1 }])))
+assert.deepEqual(ids(pickNextMatch([R1, R2, ...evenDone], { mode: 'rotate', pairStats: stale })), [3, 4, 21, 22])
+// the tie never overrides "longest resting": 5 came off earlier, so 5 goes despite 9 games
+const earlier = { ...P(5, 2, 9), rested: false, lastEndedAt: 50 }
+m = pickNextMatch([R1, R2, earlier, ...evenDone], { mode: 'rotate', pairStats: stale })
+assert.ok([5, 21, 22].every((id) => ids(m).includes(id)))
+
+// everyone waiting fits on the free courts (8 players, both courts free): rest and games
+// cannot change who plays, only who plays with whom — so the two foursomes must mix.
+// With one free court the rest rule still sends the longer-rested group as a block.
+const groupX = [1, 2, 3, 4].map((i) => ({ ...P(i, 2, 3), rested: false, lastEndedAt: 100 }))
+const groupY = [5, 6, 7, 8].map((i) => ({ ...P(i, 2, 2), rested: false, lastEndedAt: 200 }))
+const within = new Map(
+  [[1, 2, 3, 4], [5, 6, 7, 8]].flatMap((g) =>
+    g.flatMap((a, i) => g.slice(i + 1).map((b) => [pairKey(a, b), { together: 2, against: 4 }])),
+  ),
+)
+const eight = [...groupX, ...groupY]
+assert.deepEqual(ids(pickNextMatch(eight, { mode: 'rotate', pairStats: within })), [1, 2, 3, 4])
+const mixed = ids(pickNextMatch(eight, { mode: 'rotate', pairStats: within, freeCourts: 2 }))
+assert.equal(mixed.filter((id) => id <= 4).length, 2)
+
+// repeat-group warning: say WHY the four who just played together are coming back, and
+// only when something can be done about it — a warning on every pick would be ignored
+const warn = (players, opts) => repeatGroupReason(players, { mode: 'rotate', pairStats: within, ...opts })
+// 12 players on 2 courts: the rest rule narrows eight waiting down to one whole foursome
+assert.equal(warn(eight, { busyCourts: 1 }), 'rest')
+// rest off, the same foursome may still come (fewer games) but the rest rule is not why
+assert.equal(warn(eight, { busyCourts: 1, forceRest: false }), null)
+// both courts free: everyone plays now, the pick mixes, nothing to warn about
+assert.equal(warn(eight, { freeCourts: 2 }), null)
+// 8 players, other court still playing: only the four who just finished are free
+assert.equal(warn(groupY, { busyCourts: 1 }), 'wait')
+assert.equal(warn(groupY, { busyCourts: 1, mode: 'variety' }), 'wait')
+assert.equal(warn(groupY, { busyCourts: 0 }), null) // nothing to wait for
+// not the same group: four whose last games were different matches
+assert.equal(warn([groupX[0], groupX[1], groupY[0], groupY[1]], { busyCourts: 1 }), null)
+// sequential repeats groups by design; the first game of the day has no group to repeat
+assert.equal(warn(groupY, { busyCourts: 1, mode: 'sequential' }), null)
+assert.equal(warn([1, 2, 3, 4].map((i) => P(i, 2)), { busyCourts: 1 }), null)
+
 // billing: absent and non-paying excluded from the divisor, resting still pays
 const who = [{ status: 'waiting' }, { status: 'resting' }, { status: 'absent' }, { status: 'playing', paying: false }]
 const bill = computeBilling({ players: who, courts: [{ hours: 2 }, { hours: '1.5' }], billing: { hourlyRate: '200', shuttlePrice: '80', shuttleCount: '3' } })
@@ -107,9 +152,9 @@ assert.ok(ids(pickNextMatch(starved, { mode: 'variety', pairStats: far })).inclu
 // the PDF and the PNG share this one model, so a slip here shows up in both
 const REP = {
   players: [
-    { name: 'Ae', status: 'waiting', gamesPlayed: 5, minutesPlayed: 60, wins: 3, losses: 1, pointDiff: 9 },
-    { name: 'Bee', status: 'waiting', gamesPlayed: 2, minutesPlayed: 20, wins: 0, losses: 0, pointDiff: 0 },
-    { name: 'Cee', status: 'absent', gamesPlayed: 0, minutesPlayed: 0, wins: 0, losses: 0, pointDiff: 0 },
+    { name: 'Ae', status: 'waiting', gamesPlayed: 5, minutesPlayed: 60 },
+    { name: 'Bee', status: 'waiting', gamesPlayed: 2, minutesPlayed: 20 },
+    { name: 'Cee', status: 'absent', gamesPlayed: 0, minutesPlayed: 0 },
   ],
   summary: { finishedGames: 7, totalPlayMinutes: 80 },
   billing: { total: 999, perPerson: 499.5, payerCount: 2 },
@@ -128,12 +173,7 @@ rep = buildDayReport({ ...REP, day: { ...openDay, status: 'done', finals: frozen
 assert.equal(rep.tiles[2].value, '500 บาท') // จบแล้ว = ยอดที่ freeze ไว้
 assert.equal(rep.tiles[3].value, '250 บาท')
 assert.ok(!rep.notes.some((n) => n.includes('ยังไม่จบ')))
-// ไม่มีใครจดแต้ม -> ไม่ต้องมีคอลัมน์ชนะ-แพ้
-assert.ok(!reportColumns(buildDayReport({
-  ...REP,
-  players: REP.players.map((p) => ({ ...p, wins: 0, losses: 0 })),
-  day: openDay,
-}).hasScores).some((c) => c.key === 'record'))
-assert.ok(reportColumns(true).some((c) => c.key === 'record'))
+// ทุกคอลัมน์ต้องมีค่าในทุกแถว ไม่งั้น PDF กับรูปจะมีช่องว่างโผล่
+assert.ok(reportColumns().every((c) => rep.rows.every((r) => r[c.key] !== undefined)))
 
 console.log('pairing ok')

@@ -73,25 +73,11 @@ function byFairness(p1, p2) {
   return p1.queuedAt - p2.queuedAt
 }
 
-// ระดับมือ 1–3 -> rating ตั้งต้น (100 แต้ม ≈ หนึ่งระดับมือ) — ต้องตรงกับ skill_rating() ใน SQL
-export const skillRating = (skill) => 800 + 100 * skill
-
-// ความเก่งที่ใช้จับคู่: rating ที่เรียนรู้จากแต้มจริง ถ้ายังไม่มี (แขก / ยังไม่เคยจดแต้ม) ใช้ระดับมือ
-export const strength = (p) => p.rating ?? skillRating(p.skill)
-
-const teamRating = (team) => team.reduce((s, p) => s + strength(p), 0) / team.length
-
-/** โอกาสที่ทีม A ชนะ ตามสูตร Elo เดียวกับ apply_match_rating ใน SQL — 0.5 = สูสีพอดี */
-export function winChance(teamA, teamB) {
-  return 1 / (1 + 10 ** ((teamRating(teamB) - teamRating(teamA)) / 400))
-}
-
-// ผลต่างความเก่งของสองทีม วัดเป็น "ระดับมือ" (100 rating = 1) ให้ WEIGHT.skillGap
-// ยังมีความหมายเดิมตอนที่ทุกคนยังใช้ค่าจากระดับมืออยู่
+// ผลต่างผลรวมระดับมือของสองทีม (หน่วยเป็นระดับมือ) ให้ WEIGHT.skillGap
 function skillGap({ teamA, teamB }) {
-  const sumA = teamA.reduce((s, p) => s + strength(p), 0)
-  const sumB = teamB.reduce((s, p) => s + strength(p), 0)
-  return Math.abs(sumA - sumB) / 100
+  const sumA = teamA.reduce((s, p) => s + p.skill, 0)
+  const sumB = teamB.reduce((s, p) => s + p.skill, 0)
+  return Math.abs(sumA - sumB)
 }
 
 // ยิ่งคะแนนต่ำยิ่งดี — w ให้โหมด variety ส่งตารางน้ำหนักของตัวเองเข้ามา
@@ -146,16 +132,31 @@ function* chooseFour(list) {
  * เป็น soft rule: คนพักครบมีไม่ถึง 4 ก็เติมจากคนที่ยังพักไม่ครบ — จับคู่ต้องได้เสมอ
  * (เช่น 5 คน 1 คอร์ต ไม่มีทางให้ทุกคนพักครบได้)
  *
- * ตัวเติมเรียงตาม "พักมานานสุด" (queuedAt น้อย = กลับเข้าคิวก่อน) ไม่ใช่ตามจำนวนเกม
+ * ตัวเติมเรียงตาม "พักมานานสุด" (จบเกมล่าสุดก่อน) ไม่ใช่ตามจำนวนเกม
  * ถ้าเรียงตามจำนวนเกม คนมาสายจะถูกดึงกลับลงทันทีทุกรอบเพราะเกมน้อยกว่าเพื่อน
  * ซึ่งคือปัญหาที่กติกานี้ตั้งใจแก้ — เมื่อคนเกินครึ่งอยู่ในคอร์ต (เช่น 12 คน 2 คอร์ต)
  * แทบไม่มีใครพักครบเกม กรณีนี้จึงเกิดบ่อย ไม่ใช่กรณีขอบ
+ *
+ * คนที่จบเกมเดียวกันพักมานานเท่ากันพอดี (lastEndedAt เดียวกัน) จึงเป็น "กลุ่มเสมอ"
+ * ถ้าต้องหยิบแค่บางคนจากกลุ่มนี้ ห้ามตัดสินด้วย queuedAt — finish_match แจก
+ * queue_seq ให้สี่คนตามลำดับแถวในตาราง ซึ่งเป็นลำดับเดิมทุกครั้ง คนกลุ่มเดิม
+ * (ส่วนใหญ่คนที่ถูกเพิ่มเข้าวันก่อน) จะถูกดึงกลับลงติดกันทุกเกมและลงคอร์ตคู่กันตลอด
+ * จำลอง 10 คน 2 คอร์ต 20 เกม: คนหนึ่งได้ 11 เกม อีกคน 6 เกม
+ * จึงคืนทั้งกลุ่มเสมอให้ตัวจับคู่เลือกเอง พร้อมรายชื่อคนที่ต้องได้ลงแน่ ๆ (forced)
  */
 function restFirst(sorted) {
   const rested = sorted.filter((p) => p.rested !== false)
-  if (rested.length >= 4) return rested
-  const tired = sorted.filter((p) => p.rested === false).sort((a, b) => a.queuedAt - b.queuedAt)
-  return [...rested, ...tired].slice(0, 4)
+  if (rested.length >= 4) return { pool: rested, forced: [] }
+
+  const endedAt = (p) => p.lastEndedAt ?? p.queuedAt
+  const tired = sorted
+    .filter((p) => p.rested === false)
+    .sort((a, b) => endedAt(a) - endedAt(b) || byFairness(a, b))
+  const cutoff = endedAt(tired[3 - rested.length])
+  const sure = [...rested, ...tired.filter((p) => endedAt(p) < cutoff)]
+  // กลุ่มเสมอเรียงตาม byFairness อยู่แล้ว (sort ข้างบน) — โหมด sequential หยิบจากหัวได้เลย
+  const tie = tired.filter((p) => endedAt(p) === cutoff)
+  return { pool: [...sure, ...tie], forced: sure.map((p) => p.id) }
 }
 
 /**
@@ -199,6 +200,18 @@ function pickVariety(byGames, pairStats) {
   return best
 }
 
+// คนรอทุกคนได้ลงรอบนี้หมด (เช่น 8 คน รอทั้งสองคอร์ตว่างแล้วค่อยจับ) — กติกาพักกับ
+// จำนวนเกมเปลี่ยนไม่ได้ว่าใครได้เล่น เหลือแค่ว่าใครอยู่คอร์ตเดียวกับใคร ถ้ายังใช้
+// สองกติกานี้ กลุ่มที่จบก่อน (หรือเล่นมากกว่าหนึ่งเกม) จะถูกจับลงด้วยกันเองทั้งกลุ่ม
+// และสองกลุ่มไม่มีวันได้สลับกันเลยทั้งวัน
+const allPlayNow = (waitingCount, freeCourts) =>
+  waitingCount % 4 === 0 && waitingCount <= 4 * freeCourts
+
+// variety ไม่ใช้กติกาพัก แม้ตอนถอยไปทางสำรอง — จะได้ไม่ขัดกับที่บอกผู้ใช้ไว้
+// ปิดบังคับพัก = จำนวนเกมเป็นตัวตัดสินเดียว และมีคนให้เลือกจับคู่มากขึ้น
+const restApplies = (mode, forceRest, everyonePlays) =>
+  forceRest && !IGNORES_FORCE_REST.includes(mode) && !everyonePlays
+
 function splitsOf(four) {
   const [a, b, c, d] = four
   return [
@@ -215,37 +228,46 @@ function splitsOf(four) {
 // ให้คะแนนรวมต่ำสุด — คู่ซ้ำแพงสุด รองมาคือเจอกันซ้ำ ฝีมือห่าง และข้ามคิว
 // การเลี่ยงคู่ซ้ำเป็น soft constraint เสมอ: ถ้าเหลือรอคิวพอดี 4 คน
 // ก็ยังจับได้ตามปกติ ไม่มีทางที่ระบบจะปฏิเสธการจับคู่เพราะคู่ซ้ำ
+//
+// freeCourts = จำนวนคอร์ตที่ว่างอยู่ตอนกดจับ (รวมคอร์ตที่กำลังจะจับนี้) ใช้ดูว่า
+// คนรอทุกคนจะได้ลงรอบนี้หมดหรือเปล่า — ดู everyonePlays
 export function pickNextMatch(waitingPlayers, options = {}) {
   if (waitingPlayers.length < 4) return null
 
-  const { mode = 'sequential', pairStats = null, forceRest = true } = options
+  const { mode = 'sequential', pairStats = null, forceRest = true, freeCourts = 1 } = options
   const byGames = [...waitingPlayers].sort(byFairness)
   const hasPairs = Boolean(pairStats) && pairStats.size > 0
 
   // เกมแรกของวันยังไม่มีประวัติคู่ ทุกโหมดที่เลี่ยงคู่ซ้ำจึงถอยไปจับ 4 คนแรก
   if (mode === 'variety' && hasPairs) return pickVariety(byGames, pairStats)
 
-  // variety ไม่ใช้กติกาพัก แม้ตอนถอยไปทางสำรอง — จะได้ไม่ขัดกับที่บอกผู้ใช้ไว้
-  // ปิดบังคับพัก = จำนวนเกมเป็นตัวตัดสินเดียว และมีคนให้เลือกจับคู่มากขึ้น
-  const sorted = forceRest && mode !== 'variety' ? restFirst(byGames) : byGames
+  const everyonePlays = allPlayNow(byGames.length, freeCourts)
+
+  const { pool, forced } = restApplies(mode, forceRest, everyonePlays)
+    ? restFirst(byGames)
+    : { pool: byGames, forced: [] }
 
   if (mode !== 'rotate' || !hasPairs) {
     // 2v2 ที่ผลรวมฝีมือสองทีมห่างกันน้อยสุด (เท่ากันเอาแบบแรก)
-    return splitsOf(sorted.slice(0, 4)).reduce((best, s) => (skillGap(s) < skillGap(best) ? s : best))
+    return splitsOf(pool.slice(0, 4)).reduce((best, s) => (skillGap(s) < skillGap(best) ? s : best))
   }
 
-  // restFirst อาจตัดเหลือ 4 คนพอดี ซึ่งเลือกไว้แล้วด้วยกติกาพัก — ห้ามให้ fairPool
-  // กรองซ้ำตามจำนวนเกม (คนพักครบที่เล่นมากกว่าจะหลุดจนเหลือไม่ถึง 4)
-  const window = sorted.length > 4 ? fairPool(sorted) : sorted
+  // คนที่กติกาพักบังคับให้ลงอยู่แล้ว ห้ามให้ fairPool กรองทิ้งตามจำนวนเกม
+  // (คนพักครบที่เล่นมากกว่าจะหลุดจนเหลือไม่ถึง 4) — วงจึงเป็น pool ทั้งก้อน
+  // ซึ่งเล็กอยู่แล้ว: คนที่ต้องลงไม่เกิน 3 + กลุ่มเสมอจากเกมเดียว 4 คน
+  const window = forced.length > 0 || everyonePlays || pool.length <= 4 ? pool : fairPool(pool)
 
   let best = null
   let bestGames = Infinity
   let bestScore = Infinity
 
   for (const { players, indices } of chooseFour(window)) {
+    if (forced.some((id) => !players.some((p) => p.id === id))) continue
+
     // 0,1,2,3 คือชุดหัวคิวพอดี = ไม่ข้ามใครเลย
-    const queueSkip = indices.reduce((s, idx) => s + idx, 0) - 6
-    const totalGames = players.reduce((s, p) => s + p.gamesPlayed, 0)
+    // everyonePlays: ทุกคนได้ลงรอบนี้อยู่แล้ว ลำดับคิวและจำนวนเกมไม่มีความหมาย
+    const queueSkip = everyonePlays ? 0 : indices.reduce((s, idx) => s + idx, 0) - 6
+    const totalGames = everyonePlays ? 0 : players.reduce((s, p) => s + p.gamesPlayed, 0)
 
     // ชุดที่เล่นรวมกันน้อยกว่าชนะเสมอ ไม่ว่าคะแนนคู่ซ้ำจะเป็นเท่าไหร่
     // (ถ้าเอาสองอย่างมาบวกกันด้วยน้ำหนัก คนที่เคยจับคู่กับทุกคนในวงแล้ว
@@ -263,4 +285,37 @@ export function pickNextMatch(waitingPlayers, options = {}) {
   }
 
   return best
+}
+
+/**
+ * กดจับคู่รอบนี้แล้วจะได้ 4 คนที่เพิ่งลงเกมเดียวกันมาทั้งกลุ่มหรือเปล่า และเพราะอะไร
+ * ให้หน้าจอเตือนก่อนกด — ไม่งั้นคนจัดก๊วนเห็นแค่ว่า "จับได้แต่คู่เดิม" โดยไม่รู้ว่าแก้ยังไง
+ *
+ *   'rest' = บังคับพักบีบตัวเลือกเหลือ 4 คนนี้พอดี ทั้งที่มีคนรอมากกว่านั้น
+ *            (12 หรือ 16 คน 2 คอร์ต: แต่ละกลุ่มวนลงเป็นก้อนเดิมทั้งวัน)
+ *   'wait' = มีคนว่างแค่ 4 คนนี้ เพราะคอร์ตอื่นยังมีเกมอยู่ (8 คน 2 คอร์ต)
+ *            รอให้คอร์ตอื่นจบก่อนแล้วค่อยจับจะผสมกลุ่มได้ — ดู allPlayNow
+ *   null   = ไม่ใช่กลุ่มเดิม หรือเป็นกลุ่มเดิมแต่ไม่มีทางเลี่ยง ไม่ต้องเตือน
+ *
+ * "กลุ่มเดิม" = ทั้งสี่คนมี lastEndedAt เดียวกัน คือเกมล่าสุดของทุกคนเป็นแมตช์เดียวกัน
+ * โหมด sequential ไม่เตือน — วนกลุ่มเดิมคือพฤติกรรมของมันที่คำอธิบายโหมดบอกไว้แล้ว
+ *
+ * ใช้ตัวเลือกชุดเดียวกับ pickNextMatch บวก busyCourts = จำนวนคอร์ตที่มีเกมค้างอยู่
+ */
+export function repeatGroupReason(waitingPlayers, options = {}) {
+  const { mode = 'sequential', forceRest = true, freeCourts = 1, busyCourts = 0 } = options
+  if (mode === 'sequential') return null
+
+  const match = pickNextMatch(waitingPlayers, options)
+  if (!match) return null
+  const four = [...match.teamA, ...match.teamB]
+  const ended = four[0].lastEndedAt
+  if (ended == null || four.some((p) => p.lastEndedAt !== ended)) return null
+
+  if (waitingPlayers.length === 4) return busyCourts > 0 ? 'wait' : null
+
+  // มีคนรอมากกว่า 4 แต่ยังได้กลุ่มเดิม — โทษกติกาพักเฉพาะตอนที่มันบีบเหลือ 4 คนจริง ๆ
+  // (ถ้าวงยังกว้างแล้วตัวจับคู่เลือกกลุ่มนี้เอง ปิดบังคับพักก็ไม่ได้ช่วย)
+  if (!restApplies(mode, forceRest, allPlayNow(waitingPlayers.length, freeCourts))) return null
+  return restFirst([...waitingPlayers].sort(byFairness)).pool.length === 4 ? 'rest' : null
 }

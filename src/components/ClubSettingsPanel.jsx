@@ -13,7 +13,6 @@ export default function ClubSettingsPanel({
   club,
   stats,
   onRename,
-  onToggleRating,
   onSavePromptPay,
   onDelete,
 }) {
@@ -149,26 +148,6 @@ export default function ClubSettingsPanel({
           </button>
         </div>
       </form>
-
-      <label className="guest-toggle rating-toggle">
-        <input
-          type="checkbox"
-          checked={club.showRating}
-          disabled={busy}
-          onChange={async (e) => {
-            setError('')
-            try {
-              await onToggleRating(e.target.checked)
-            } catch (err) {
-              setError(err.message)
-            }
-          }}
-        />
-        <span>
-          ให้ทุกคนในก๊วนเห็นตัวเลข rating ในแท็บอันดับ
-          <span className="panel-hint"> (ปิดแล้วยังเรียงอันดับเหมือนเดิม และคนจัดก๊วนยังเห็นเลขอยู่)</span>
-        </span>
-      </label>
 
       <div className="danger-zone">
         <h3 className="section-head">ลบก๊วนนี้</h3>

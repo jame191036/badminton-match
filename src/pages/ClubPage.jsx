@@ -4,7 +4,6 @@ import { useClubDays } from '../hooks/useClubDays'
 import { usePastDays } from '../hooks/usePastDays'
 import ClubSharePanel from '../components/ClubSharePanel'
 import ClubSettingsPanel from '../components/ClubSettingsPanel'
-import ClubRanking from '../components/ClubRanking'
 import OutstandingPanel from '../components/OutstandingPanel'
 import { SkeletonHead, SkeletonList } from '../components/Skeleton'
 import { clock, thaiDate, todayISO } from '../utils/date'
@@ -37,7 +36,6 @@ export default function ClubPage() {
     startDay,
     cancelDay,
     renameClub,
-    setShowRating,
     setPromptPay,
     deleteClub,
   } = useClubDays(clubId)
@@ -122,7 +120,6 @@ export default function ClubPage() {
         <div className="tab-bar" role="tablist">
           {[
             { id: 'days', label: 'วันเล่น' },
-            { id: 'ranking', label: 'อันดับ' },
             { id: 'outstanding', label: 'ค้างจ่าย' },
             { id: 'share', label: 'คนในก๊วน' },
             { id: 'settings', label: 'ตั้งค่า' },
@@ -144,8 +141,6 @@ export default function ClubPage() {
 
         {tab === 'outstanding' ? (
           <OutstandingPanel clubId={clubId} club={club} canEdit={canEdit} />
-        ) : tab === 'ranking' ? (
-          <ClubRanking clubId={clubId} showRating={club.showRating || canEdit} />
         ) : tab === 'share' ? (
           <ClubSharePanel clubId={clubId} isOwner={club.role === 'owner'} />
         ) : tab === 'settings' ? (
@@ -154,7 +149,6 @@ export default function ClubPage() {
             // total_days นับทุกสถานะ รวม playing กับ cancelled ที่ cascade ก็ลบไปด้วย
             stats={{ dayCount: club.totalDays }}
             onRename={renameClub}
-            onToggleRating={setShowRating}
             onSavePromptPay={setPromptPay}
             onDelete={async () => {
               await deleteClub()
