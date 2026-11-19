@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { IGNORES_FORCE_REST, QUEUE_MODES, skillLabel, winChance } from '../utils/pairing'
+import { IGNORES_FORCE_REST, QUEUE_MODES, skillLabel } from '../utils/pairing'
 import AsyncButton from './AsyncButton'
 import { mmss } from '../utils/date'
 import EditableName from './EditableName'
@@ -46,64 +46,11 @@ function TeamSide({ team, label, onSubstitute }) {
   )
 }
 
-/**
- * โอกาสชนะของสองฝั่งจาก rating — ให้เห็นว่าคู่นี้สูสีแค่ไหนก่อนตี
- * ไม่โชว์เลข rating ของใคร โชว์แค่เปอร์เซ็นต์ (ก๊วนที่ปิดการเห็น rating ก็ยังใช้ได้)
- */
-function OddsBadge({ teamA, teamB }) {
-  const a = Math.round(winChance(teamA, teamB) * 100)
-  return (
-    <span className="odds" title="โอกาสชนะที่ระบบคาดไว้ ฝั่ง A – ฝั่ง B">
-      {a}–{100 - a}
-    </span>
-  )
-}
-
-const toScore = (v) => (v === '' ? null : Number(v))
-
-/**
- * จบเกม พร้อมช่องแต้มสองฝั่ง — ไม่บังคับกรอก เว้นว่างทั้งคู่ก็จบได้
- * (บางก๊วนไม่จดแต้ม ถ้าบังคับจะกลายเป็นขั้นตอนเกินที่ทุกคนกดข้าม)
- * ถ้ากรอก ต้องครบสองฝั่งและไม่เสมอ — DB ตรวจและตอบเป็นข้อความไทย
- */
-function FinishForm({ onFinish }) {
-  const [a, setA] = useState('')
-  const [b, setB] = useState('')
-
-  return (
-    <div className="finish-form">
-      <div className="score-inputs">
-        <input
-          type="number"
-          min="0"
-          max="99"
-          inputMode="numeric"
-          placeholder="A"
-          aria-label="แต้มฝั่ง A"
-          value={a}
-          onChange={(e) => setA(e.target.value)}
-        />
-        <span className="score-dash">–</span>
-        <input
-          type="number"
-          min="0"
-          max="99"
-          inputMode="numeric"
-          placeholder="B"
-          aria-label="แต้มฝั่ง B"
-          value={b}
-          onChange={(e) => setB(e.target.value)}
-        />
-      </div>
-      <AsyncButton
-        className="btn-primary btn-finish"
-        busyLabel="กำลังจบเกม..."
-        onClick={() => onFinish(toScore(a), toScore(b))}
-      >
-        {a === '' && b === '' ? 'จบเกม → คืนคิว' : 'บันทึกแต้ม + จบเกม'}
-      </AsyncButton>
-    </div>
-  )
+// กดจับคู่ตอนนี้จะได้ 4 คนที่เพิ่งเล่นด้วยกันมาทั้งกลุ่ม — บอกสาเหตุกับทางเลี่ยง
+// (ดู repeatGroupReason ใน pairing.js) ไม่ได้ห้ามกด แค่ให้รู้ก่อนว่าจะได้อะไร
+const REPEAT_GROUP_HINT = {
+  rest: 'บังคับพักทำให้รอบนี้ได้ 4 คนกลุ่มเดิมที่เพิ่งเล่นด้วยกัน — ถ้าอยากให้กลุ่มสลับกัน เอาติ๊ก “บังคับพัก” ด้านบนออก',
+  wait: 'คนว่างตอนนี้มีแค่ 4 คนที่เพิ่งเล่นด้วยกัน จับตอนนี้จะได้กลุ่มเดิม — ถ้าอยากสลับกลุ่ม รอคอร์ตอื่นจบก่อนแล้วค่อยจับ',
 }
 
 export default function CourtBoard({
@@ -112,6 +59,8 @@ export default function CourtBoard({
   // วันเล่นเริ่มแล้วหรือยัง — ก่อนเริ่ม DB ไม่ยอมให้จับคู่ ปุ่มจึงต้องกดไม่ได้ตั้งแต่แรก
   live,
   waitingCount,
+  // 'rest' | 'wait' | null — จาก useBadmintonData
+  repeatGroup = null,
   onAssign,
   onStart,
   onSubstitute,
@@ -129,6 +78,10 @@ export default function CourtBoard({
   const ignoresRest = IGNORES_FORCE_REST.includes(queueMode)
   const hasRunning = courts.some((c) => c.match?.status === 'playing')
   const now = useNow(hasRunning)
+  // ขึ้นคำเตือนแค่คอร์ตว่างคอร์ตแรก — ว่างหลายคอร์ตก็เป็นคำเตือนเดียวกัน ไม่ต้องซ้ำทุกใบ
+  const repeatHint =
+    !readOnly && live && waitingCount >= 4 ? REPEAT_GROUP_HINT[repeatGroup] : null
+  const hintCourtId = repeatHint ? courts.find((c) => !c.match)?.id : null
 
   return (
     <div className="court-board">
@@ -230,10 +183,7 @@ export default function CourtBoard({
                         isPending && !readOnly ? (pid) => onSubstitute(match.id, pid) : null
                       }
                     />
-                    <div className="vs mono">
-                      VS
-                      {playerCount === 4 && <OddsBadge teamA={match.teamA} teamB={match.teamB} />}
-                    </div>
+                    <div className="vs mono">VS</div>
                     <TeamSide
                       team={match.teamB}
                       label="ฝั่ง B"
@@ -283,13 +233,20 @@ export default function CourtBoard({
                     </>
                   ) : (
                     !readOnly && (
-                      <FinishForm onFinish={(a, b) => onFinish(match.id, a, b)} />
+                      <AsyncButton
+                        className="btn-primary btn-finish"
+                        busyLabel="กำลังจบเกม..."
+                        onClick={() => onFinish(match.id)}
+                      >
+                        จบเกม → คืนคิว
+                      </AsyncButton>
                     )
                   )}
                 </>
               ) : (
                 <>
                   <p className="court-empty-msg">คอร์ตว่าง</p>
+                  {court.id === hintCourtId && <p className="court-warn">{repeatHint}</p>}
                   {!readOnly && (
                     <AsyncButton
                       className="btn-primary"

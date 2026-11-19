@@ -54,7 +54,10 @@ begin
         'close_session', 'open_session', 'get_or_create_my_session',
         'add_player', 'set_player_attendance', 'resume_player_queue',
         'assign_court', 'start_match', 'substitute_player', 'cancel_match',
-        'finish_match', 'remove_court'
+        'finish_match', 'remove_court',
+        -- ระบบแต้ม/rating ที่เอาออกไปแล้ว (migration 119) — ลบทิ้งถ้ายังค้างอยู่
+        'set_match_score', 'assert_valid_score', 'apply_match_rating',
+        'revert_match_rating', 'skill_rating'
       )
   loop
     execute 'drop function if exists ' || r.sig || ' cascade';
@@ -86,8 +89,6 @@ create table clubs (
   name       text not null check (char_length(trim(name)) > 0),
   note       text,
   active     boolean not null default true,
-  -- ให้ทุกคนในก๊วนเห็นตัวเลข rating ไหม (คนจัดก๊วนเห็นเสมอ)
-  show_rating boolean not null default true,
   -- พร้อมเพย์ของคนเก็บเงิน ไว้สร้าง QR — เบอร์ 10 หลัก / เลขบัตร 13 หลัก / e-wallet 15 หลัก
   -- สมาชิกทุกคนในก๊วนเห็น (ต้องเห็นถึงจะโอนได้)
   promptpay_id   text check (promptpay_id ~ '^([0-9]{10}|[0-9]{13}|[0-9]{15})$'),
@@ -134,23 +135,11 @@ create table members (
   default_skill smallint not null default 2 check (default_skill between 1 and 3),
   note          text,
   active        boolean not null default true,
-  -- ความเก่งที่เรียนรู้จากแต้มจริง (แบบ Elo) — null = ยังไม่มีเกมที่จดแต้ม
-  -- ให้ใช้ค่าจากระดับมือแทน (skill_rating) ปรับระดับมือแล้วค่าตามไปด้วยจนกว่าจะเริ่มเล่นจริง
-  rating        numeric(7, 2),
-  rated_games   int not null default 0,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
 
 create index idx_members_owner on members(owner_id);
-
--- ระดับมือ 1–3 -> rating ตั้งต้น (100 แต้ม ≈ ห่างกันหนึ่งระดับมือ)
--- ต้องตรงกับ skillRating() ใน src/utils/pairing.js
-create or replace function skill_rating(p_skill int)
-returns numeric
-language sql
-immutable
-as $$ select 800 + 100 * p_skill::numeric $$;
 
 create unique index uq_members_owner_name
   on members(owner_id, lower(trim(name)));
@@ -385,13 +374,7 @@ create table matches (
                check (status in ('pending', 'playing', 'done')),
   started_at timestamptz,    -- null ระหว่าง pending
   ended_at   timestamptz,
-  -- แต้มไม่บังคับ: ไม่กรอกก็จบเกมได้ เกมนั้นแค่ไม่ถูกนับแพ้/ชนะ
-  -- แบดไม่มีเสมอ แต้มเท่ากันจึงไม่ยอม (ไม่งั้นตัดสินผู้ชนะไม่ได้)
-  score_a    smallint check (score_a between 0 and 99),
-  score_b    smallint check (score_b between 0 and 99),
-  created_at timestamptz not null default now(),
-  constraint matches_score_both check ((score_a is null) = (score_b is null)),
-  constraint matches_score_no_tie check (score_a is null or score_a <> score_b)
+  created_at timestamptz not null default now()
 );
 
 create index idx_matches_session on matches(session_id);
@@ -415,9 +398,6 @@ create table match_players (
   player_name text not null,
   skill       smallint not null check (skill between 1 and 3),
   team        text not null check (team in ('A', 'B')),
-  -- rating ที่เกมนี้ให้/หักคนนี้ (null = ไม่ได้คิด: ไม่จดแต้ม แขก หรือเกมสั้นผิดปกติ)
-  -- เก็บไว้เพื่อถอนออกตอนแก้แต้มย้อนหลัง
-  rating_delta numeric(6, 2),
   created_at  timestamptz not null default now()
 );
 
@@ -565,8 +545,6 @@ select
   m.court_name,
   m.started_at,
   m.ended_at,
-  m.score_a,
-  m.score_b,
   array_agg(mp.player_name) filter (where mp.team = 'A') as team_a_names,
   array_agg(mp.player_name) filter (where mp.team = 'B') as team_b_names
 from matches m
@@ -621,17 +599,15 @@ select
   p.paying,
   count(m.id)                                                           as games,
   coalesce(sum(extract(epoch from (m.ended_at - m.started_at))), 0) / 60 as minutes,
-  -- แพ้/ชนะนับเฉพาะเกมที่กรอกแต้ม (ฝั่งเราแต้มมากกว่า = ชนะ)
-  count(m.id) filter (where m.score_a is not null and (mp.team = 'A') =  (m.score_a > m.score_b)) as wins,
-  count(m.id) filter (where m.score_a is not null and (mp.team = 'A') <> (m.score_a > m.score_b)) as losses,
-  coalesce(sum(case when mp.team = 'A' then m.score_a - m.score_b else m.score_b - m.score_a end)
-           filter (where m.score_a is not null), 0) as point_diff,
   -- พักครบหนึ่งเกมแล้วหรือยัง: หลังจบเกมล่าสุดของเรา ต้องมีเกมอื่นที่จับคู่
   -- หลังจากนั้นและเล่นจบไปแล้วหนึ่งเกม (ยังไม่เคยเล่น = พักครบ)
   max(m.ended_at) is null or exists (
     select 1 from matches m2
     where m2.session_id = p.session_id and m2.status = 'done' and m2.created_at > max(m.ended_at)
-  ) as rested
+  ) as rested,
+  -- เวลาจบเกมล่าสุด — คนที่จบเกมเดียวกันได้ค่าเดียวกันพอดี กติกาพักฝั่งแอปใช้แยก
+  -- "พักมานานเท่ากัน" ออกจาก "พักมานานกว่า" (queue_seq แยกไม่ได้ ดู finish_match)
+  max(m.ended_at) as last_ended_at
 from players p
 left join match_players mp on mp.player_id = p.id
 left join matches m
@@ -721,27 +697,6 @@ left join players p on p.member_id = mb.id and p.status <> 'absent'
 left join sessions s on s.id = p.session_id and s.status = 'done'
 group by mb.id;
 
--- อันดับแพ้/ชนะของก๊วน รวมทุกวันเล่น นับเฉพาะเกมที่กรอกแต้ม
--- ผูกกับสมาชิก (member_id) ข้ามวันได้ แขกขาจรไม่มี member จึงไม่ติดอันดับ
--- ชื่อใช้ชื่อปัจจุบันในรายชื่อหลัก เปลี่ยนชื่อแล้วอันดับยังเป็นคนเดิม
-create or replace view v_club_ranking as
-select
-  s.club_id,
-  mb.id   as member_id,
-  mb.name,
-  coalesce(mb.rating, skill_rating(mb.default_skill)) as rating,
-  mb.rated_games,
-  count(*)                                                        as games,
-  count(*) filter (where (mp.team = 'A') =  (m.score_a > m.score_b)) as wins,
-  count(*) filter (where (mp.team = 'A') <> (m.score_a > m.score_b)) as losses,
-  sum(case when mp.team = 'A' then m.score_a - m.score_b else m.score_b - m.score_a end) as point_diff
-from match_players mp
-join matches m  on m.id = mp.match_id and m.status = 'done' and m.score_a is not null
-join sessions s on s.id = m.session_id
-join players p  on p.id = mp.player_id
-join members mb on mb.id = p.member_id
-group by s.club_id, mb.id, mb.name, mb.rating, mb.default_skill, mb.rated_games;
-
 -- ยอดค้างจ่าย: หนึ่งแถวต่อคนต่อวันที่ยังไม่จ่าย ของวันที่จบแล้วเท่านั้น
 -- (วันที่ยังเล่นอยู่ยอดยังเปลี่ยนได้ จึงไม่นับเป็นหนี้)
 -- ใช้ยอดที่ freeze ไว้ (final_per_person) ไม่คำนวณใหม่ — แบบเดียวกับ v_club_days
@@ -782,7 +737,6 @@ select
   (select max(s.play_date) from sessions s where s.club_id = c.id and s.status = 'done') as last_played_on,
   (select min(s.play_date) from sessions s
     where s.club_id = c.id and s.status = 'planned' and s.play_date >= current_date) as next_play_date,
-  c.show_rating,
   c.promptpay_id,
   c.promptpay_name
 from clubs c
@@ -802,7 +756,6 @@ alter view v_session_summary      set (security_invoker = on);
 alter view v_pair_history         set (security_invoker = on);
 alter view v_club_days            set (security_invoker = on);
 alter view v_member_stats         set (security_invoker = on);
-alter view v_club_ranking         set (security_invoker = on);
 alter view v_club_outstanding     set (security_invoker = on);
 alter view v_my_clubs             set (security_invoker = on);
 

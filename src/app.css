@@ -469,9 +469,7 @@
   gap: 8px;
 }
 .team-skill { font-size: 0.72rem; color: var(--text-faint); }
-.vs { color: var(--coral); font-weight: 700; font-size: 0.85rem; display: flex; flex-direction: column; align-items: center; gap: 2px; }
-/* โอกาสชนะใต้ VS — ตัวเล็กสีจาง เป็นข้อมูลประกอบ ไม่ใช่จุดเด่น */
-.odds { font-size: 0.68rem; font-weight: 500; color: var(--text-faint); white-space: nowrap; }
+.vs { color: var(--coral); font-weight: 700; font-size: 0.85rem; }
 
 .btn-finish { width: 100%; }
 
@@ -505,16 +503,6 @@
 .qr-info { display: flex; flex-direction: column; gap: 4px; }
 .qr-label { font-size: 0.8rem; color: var(--text-faint); }
 .qr-amount { font-size: 1.4rem; color: var(--court-dark); }
-
-/* แต้มก่อนจบเกม — ช่องเล็กสองช่องตรงกลาง ฝั่ง A ซ้าย ฝั่ง B ขวา ตรงกับทีมบนการ์ด */
-.finish-form { display: flex; flex-direction: column; gap: 8px; }
-.score-inputs { display: flex; align-items: center; justify-content: center; gap: 8px; }
-.score-inputs input { width: 72px; text-align: center; font-size: 1.05rem; }
-.score-dash { color: var(--text-faint); font-weight: 600; }
-
-/* แต้มในประวัติ — ฝั่งที่ชนะตัวหนา */
-.history-score { flex: none; font-weight: 600; color: var(--text-muted); }
-.team-won { font-weight: 700; color: var(--court-dark); }
 
 /* Stats */
 .stats-summary {
@@ -572,7 +560,6 @@
 .stats-status.status-resting { color: var(--coral); }
 
 .stats-games { min-width: 52px; text-align: right; }
-.stats-record { min-width: 56px; text-align: right; font-weight: 600; }
 .stats-minutes { min-width: 92px; text-align: right; color: var(--text-faint); font-size: 0.82rem; }
 
 /* ---------- หัวตาราง (สถิติ / ประวัติ) ---------- */
