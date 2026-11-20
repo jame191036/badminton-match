@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import ThemeToggle from './ThemeToggle'
+import Logo from './Logo'
 import UserMenu from './UserMenu'
 
 const NAV = [
@@ -26,9 +27,7 @@ export default function AppLayout({ user, theme, onToggleTheme, onSignOut }) {
       <header className="app-bar">
         <div className="app-bar-inner">
           <NavLink to="/" className="brand" end>
-            <span className="brand-mark" aria-hidden="true">
-              🏸
-            </span>
+            <Logo className="brand-mark" size={28} />
             <span className="brand-name">จับคู่ลงคอร์ต</span>
           </NavLink>
 

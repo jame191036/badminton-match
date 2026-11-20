@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import ThemeToggle from './ThemeToggle'
+import Logo from './Logo'
 import PasswordField from './PasswordField'
 
 export default function ResetPassword({ onSubmit, onCancel, theme, onToggleTheme }) {
@@ -33,7 +34,7 @@ export default function ResetPassword({ onSubmit, onCancel, theme, onToggleTheme
 
       <div className="auth-card">
         <div className="auth-brand">
-          <span className="auth-shuttle" aria-hidden="true">🏸</span>
+          <Logo className="auth-shuttle" size={72} />
           <span className="eyebrow mono">จัดก๊วนแบด</span>
           <h1 className="display">ตั้งรหัสผ่านใหม่</h1>
           <p className="auth-tagline">ตั้งรหัสผ่านใหม่ให้บัญชีของคุณ แล้วเข้าใช้งานได้ทันที</p>
