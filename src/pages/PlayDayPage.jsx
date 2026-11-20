@@ -277,9 +277,11 @@ export default function PlayDayPage() {
                 เริ่มวันเล่น
               </AsyncButton>
             )}
+            {/* ปุ่มรอง ไม่ใช่ปุ่มหลัก — กดวันละครั้งและย้อนไม่ได้ ไม่ควรเด่นกว่า
+                เริ่มเกม/จบเกมที่กดทั้งวัน (บนมือถือเดิมเป็นปุ่มส้มเต็มความกว้าง) */}
             {canEdit && day.status === 'playing' && (
               <AsyncButton
-                className="btn-primary"
+                className="btn-ghost"
                 busyLabel="กำลังปิดยอด..."
                 onClick={async () => {
                   const ok = await confirm({

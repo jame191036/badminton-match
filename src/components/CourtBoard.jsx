@@ -1,8 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Play, Square } from 'lucide-react'
 import { IGNORES_FORCE_REST, QUEUE_MODES, skillLabel } from '../utils/pairing'
 import AsyncButton from './AsyncButton'
 import { mmss } from '../utils/date'
 import EditableName from './EditableName'
+import NameText from './NameText'
+import SlideToConfirm from './SlideToConfirm'
+
+// กดค้างนานเท่านี้ถึงจะพัก — นานพอที่แตะผ่าน ๆ ตอนเลื่อนจอไม่ติด สั้นพอที่ไม่ต้องรอ
+const HOLD_MS = 600
 
 // นาฬิกาเดินตัวเดียวใช้ร่วมกันทุกคอร์ต ดีกว่าให้แต่ละคอร์ตตั้ง interval เอง
 function useNow(active) {
@@ -17,32 +23,71 @@ function useNow(active) {
   return now
 }
 
-function TeamSide({ team, label, onSubstitute }) {
+/**
+ * ช่องผู้เล่นหนึ่งคน — คอร์ตที่ยังไม่เริ่ม ช่องนี้คือปุ่ม "กดค้างเพื่อพัก"
+ * ไม่มีปุ่มพักแยกข้างชื่อ (เดิมแตะทีเดียวก็พักเลย กดพลาดง่ายตอนเลื่อนจอ)
+ * กดค้าง = สีค่อย ๆ เติมเต็มช่อง 600ms · ปล่อยก่อน = ยกเลิก
+ */
+function PlayerTile({ player, side, onBench }) {
+  const timer = useRef(null)
+  const [holding, setHolding] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => () => clearTimeout(timer.current), [])
+
+  const body = (
+    <>
+      {onBench && <span className="player-tile-fill" aria-hidden="true" />}
+      <span className="player-tile-side mono">{side}</span>
+      <span className="player-tile-name">
+        <NameText name={player.name} />
+      </span>
+      <span className={`player-tile-skill skill-${player.skill}`}>
+        {busy ? 'กำลังสลับ…' : holding ? 'ค้างไว้…' : skillLabel(player.skill)}
+      </span>
+    </>
+  )
+
+  if (!onBench) return <div className="player-tile">{body}</div>
+
+  const stop = () => {
+    clearTimeout(timer.current)
+    setHolding(false)
+  }
+  const start = () => {
+    if (busy) return
+    clearTimeout(timer.current)
+    setHolding(true)
+    timer.current = setTimeout(async () => {
+      setHolding(false)
+      navigator.vibrate?.(18)
+      setBusy(true)
+      try {
+        await onBench()
+      } finally {
+        setBusy(false)
+      }
+    }, HOLD_MS)
+  }
+
   return (
-    <div className="team-side">
-      <span className="team-label mono">{label}</span>
-      {team.map((p) => (
-        <div key={p.id} className="team-player">
-          <span>{p.name}</span>
-          <span className="team-skill mono">{skillLabel(p.skill)}</span>
-          {onSubstitute && (
-            <AsyncButton
-              className="btn-ghost btn-sub"
-              onClick={() => onSubstitute(p.id)}
-              title="ยังไม่พร้อม — พักก่อน แล้วให้คนถัดไปในคิวมาแทน"
-            >
-              พัก
-            </AsyncButton>
-          )}
-        </div>
-      ))}
-      {/* ที่ว่างจากการสลับตัวโดยไม่มีใครในคิวมาแทน */}
-      {Array.from({ length: Math.max(0, 2 - team.length) }, (_, i) => (
-        <div key={`empty-${i}`} className="team-player team-player-empty">
-          <span>รอคนแทน</span>
-        </div>
-      ))}
-    </div>
+    <button
+      type="button"
+      className="player-tile is-hold"
+      data-holding={holding ? '' : undefined}
+      aria-busy={busy || undefined}
+      aria-label={`${player.name} — กดค้างเพื่อให้พัก แล้วคนถัดไปในคิวมาแทน`}
+      onPointerDown={start}
+      onPointerUp={stop}
+      onPointerLeave={stop}
+      onPointerCancel={stop}
+      // กดค้างบนมือถือต้องไม่เด้งเมนู copy/เลือกข้อความ
+      onContextMenu={(e) => e.preventDefault()}
+      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && !e.repeat && start()}
+      onKeyUp={(e) => (e.key === 'Enter' || e.key === ' ') && stop()}
+    >
+      {body}
+    </button>
   )
 }
 
@@ -146,14 +191,30 @@ export default function CourtBoard({
       <div className="court-grid">
         {courts.map((court) => {
           const match = court.match
-          const isPending = match?.status === 'pending'
+          // 'empty' | 'pending' | 'playing' — pending = จับคู่แล้ว ยังไม่กดเริ่ม (สลับตัวได้ ยังไม่จับเวลา)
+          const state = !match ? 'empty' : match.status === 'pending' ? 'pending' : 'playing'
           const playerCount = match ? match.teamA.length + match.teamB.length : 0
+          const canBench = state === 'pending' && !readOnly
+
+          // ผู้เล่น 2×2: แถวบน A แถวล่าง B · ช่องว่างจากการพักโดยไม่มีใครในคิวมาแทน = "รอคนแทน"
+          const tiles = (side, team) => [
+            ...team.map((p) => (
+              <PlayerTile
+                key={p.id}
+                player={p}
+                side={side}
+                onBench={canBench ? () => onSubstitute(match.id, p.id) : null}
+              />
+            )),
+            ...Array.from({ length: Math.max(0, 2 - team.length) }, (_, i) => (
+              <div key={`${side}-empty-${i}`} className="player-tile is-empty">
+                รอคนแทน
+              </div>
+            )),
+          ]
 
           return (
-            <div
-              key={court.id}
-              className={`court-card ${match ? (isPending ? 'pending' : 'occupied') : 'empty'}`}
-            >
+            <article key={court.id} className={`court-card is-${state}`}>
               <div className="court-head">
                 {/* กดดินสอแก้ชื่อได้ — ไปถึงสนามจริงแล้วมักได้คอร์ตคนละเบอร์ */}
                 <EditableName
@@ -164,109 +225,104 @@ export default function CourtBoard({
                 >
                   <span className="court-name display">{court.name}</span>
                 </EditableName>
-                {match && (
-                  <span className={`court-status mono ${isPending ? 'is-pending' : 'is-playing'}`}>
-                    {isPending
-                      ? 'รอเริ่มเกม'
-                      : mmss((now - (match.startedAt ?? now)) / 1000)}
-                  </span>
-                )}
+                <span className="court-head-end">
+                  {state === 'playing' && (
+                    <span className="court-clock mono">
+                      {mmss((now - (match.startedAt ?? now)) / 1000)}
+                    </span>
+                  )}
+                  {state === 'pending' && <span className="court-status">รอเริ่มเกม</span>}
+                  {/* ยกเลิกย้อนได้ในตัว (ทุกคนกลับหัวคิว ไม่นับเกม) จึงเป็นปุ่มแตะธรรมดา */}
+                  {state === 'pending' && !readOnly && (
+                    <AsyncButton className="court-cancel" onClick={() => onCancel(match.id)}>
+                      ยกเลิก
+                    </AsyncButton>
+                  )}
+                  {state === 'empty' && <span className="court-status is-empty">ว่าง</span>}
+                </span>
               </div>
 
               {match ? (
-                <>
-                  <div className="court-match">
-                    <TeamSide
-                      team={match.teamA}
-                      label="ฝั่ง A"
-                      onSubstitute={
-                        isPending && !readOnly ? (pid) => onSubstitute(match.id, pid) : null
-                      }
-                    />
-                    <div className="vs mono">VS</div>
-                    <TeamSide
-                      team={match.teamB}
-                      label="ฝั่ง B"
-                      onSubstitute={
-                        isPending && !readOnly ? (pid) => onSubstitute(match.id, pid) : null
-                      }
-                    />
-                  </div>
-
-                  {isPending ? (
-                    <>
-                      {playerCount < 4 && (
-                        <p className="court-warn">
-                          ขาดอีก {4 - playerCount} คน —{' '}
-                          {waitingCount > 0
-                            ? 'มีคนรอคิวอยู่แล้ว กด “เติมจากคิว” ได้เลย'
-                            : 'ไม่มีใครรอคิวอยู่ ให้กดชื่อคนที่พักอยู่เข้าคิว เพิ่มผู้เล่นใหม่ หรือยกเลิกไปก่อน'}
-                        </p>
-                      )}
-                      {!readOnly && (
-                        <div className="court-actions">
-                          {playerCount < 4 && waitingCount > 0 && (
-                            <AsyncButton
-                              className="btn-primary"
-                              busyLabel="กำลังเติม..."
-                              onClick={() => onFill(match.id)}
-                            >
-                              เติมจากคิว
-                            </AsyncButton>
-                          )}
-                          <AsyncButton
-                            className={playerCount < 4 ? 'btn-ghost' : 'btn-primary'}
-                            busyLabel="กำลังเริ่ม..."
-                            onClick={() => onStart(match.id)}
-                            disabled={playerCount < 4}
-                          >
-                            เริ่มเกม
-                          </AsyncButton>
-                          <AsyncButton
-                            className="btn-ghost btn-danger"
-                            onClick={() => onCancel(match.id)}
-                          >
-                            ยกเลิก
-                          </AsyncButton>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    !readOnly && (
-                      <AsyncButton
-                        className="btn-primary btn-finish"
-                        busyLabel="กำลังจบเกม..."
-                        onClick={() => onFinish(match.id)}
-                      >
-                        จบเกม → คืนคิว
-                      </AsyncButton>
-                    )
-                  )}
-                </>
+                <div className="court-tiles">
+                  {tiles('A', match.teamA)}
+                  <span className="court-vs mono" aria-hidden="true">
+                    VS
+                  </span>
+                  {tiles('B', match.teamB)}
+                </div>
               ) : (
-                <>
-                  <p className="court-empty-msg">คอร์ตว่าง</p>
-                  {court.id === hintCourtId && <p className="court-warn">{repeatHint}</p>}
-                  {!readOnly && (
-                    <AsyncButton
-                      className="btn-primary"
-                      busyLabel="กำลังจับคู่..."
-                      onClick={() => onAssign(court.id)}
-                      disabled={!live || waitingCount < 4}
-                      title={
-                        !live
-                          ? 'กดเริ่มวันเล่นก่อน'
-                          : waitingCount < 4
-                            ? 'ต้องมีผู้เล่นรอคิวอย่างน้อย 4 คน'
-                            : ''
-                      }
-                    >
-                      จับคู่ลงคอร์ต
-                    </AsyncButton>
-                  )}
-                </>
+                <p className="court-empty-msg">
+                  {readOnly || !live
+                    ? 'คอร์ตว่าง'
+                    : waitingCount >= 4
+                      ? `รอคิว ${waitingCount} คน — จับคู่ได้เลย`
+                      : `คนรอคิวไม่ครบ 4 คน (รออยู่ ${waitingCount} คน)`}
+                </p>
               )}
-            </div>
+
+              {state === 'empty' && court.id === hintCourtId && (
+                <p className="court-warn">{repeatHint}</p>
+              )}
+              {canBench && playerCount === 4 && (
+                <p className="court-hint">กดค้างที่ชื่อเพื่อให้คนนั้นพัก — คนถัดไปในคิวมาแทน</p>
+              )}
+              {state === 'pending' && playerCount < 4 && waitingCount === 0 && (
+                <p className="court-warn">
+                  ไม่มีใครรอคิวอยู่ ให้กดชื่อคนที่พักอยู่เข้าคิว เพิ่มผู้เล่นใหม่ หรือยกเลิกไปก่อน
+                </p>
+              )}
+
+              {/* คำสั่งที่ย้อนไม่ได้และกดบ่อย (เริ่ม/จบเกม) = ปัด · ที่ย้อนได้ (จับคู่/เติม) = แตะ
+                  key = สถานะ: เปลี่ยนสถานะแล้วสไลเดอร์ตัวใหม่เริ่มที่ซ้ายสุด */}
+              {!readOnly && state === 'playing' && (
+                <SlideToConfirm
+                  key="finish"
+                  label="ปัดเพื่อจบเกม"
+                  tone="stop"
+                  icon={<Square size={17} fill="currentColor" aria-hidden="true" />}
+                  onConfirm={() => onFinish(match.id)}
+                />
+              )}
+              {!readOnly &&
+                state === 'pending' &&
+                (playerCount === 4 ? (
+                  <SlideToConfirm
+                    key="start"
+                    label="ปัดเพื่อเริ่มเกม"
+                    tone="go"
+                    icon={<Play size={18} fill="currentColor" aria-hidden="true" />}
+                    onConfirm={() => onStart(match.id)}
+                  />
+                ) : (
+                  <AsyncButton
+                    className="btn-primary court-button"
+                    busyLabel="กำลังเติม..."
+                    disabled={waitingCount === 0}
+                    onClick={() => onFill(match.id)}
+                  >
+                    {waitingCount > 0
+                      ? `เติมจากคิว (ขาด ${4 - playerCount} คน)`
+                      : `ขาดอีก ${4 - playerCount} คน — ไม่มีใครรอ`}
+                  </AsyncButton>
+                ))}
+              {!readOnly && state === 'empty' && (
+                <AsyncButton
+                  className="btn-primary court-button"
+                  busyLabel="กำลังจับคู่..."
+                  onClick={() => onAssign(court.id)}
+                  disabled={!live || waitingCount < 4}
+                  title={
+                    !live
+                      ? 'กดเริ่มวันเล่นก่อน'
+                      : waitingCount < 4
+                        ? 'ต้องมีผู้เล่นรอคิวอย่างน้อย 4 คน'
+                        : ''
+                  }
+                >
+                  จับคู่ลงคอร์ต
+                </AsyncButton>
+              )}
+            </article>
           )
         })}
       </div>

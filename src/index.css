@@ -15,8 +15,13 @@
   --border-muted: #F0EBDC;
   --text: #1F2A24;
   --text-muted: #6B6656;
-  --text-faint: #8A8577;
-  --text-faintest: #B5AF9E;
+  /* ค่าต่ำสุดบนทุกพื้นที่ตัวหนังสือวาง (surface, surface-muted, bg, การ์ดที่ย้อมสี 8%):
+     faint ≥ 4.6:1 ใช้กับข้อความที่ต้องอ่าน / faintest ≥ 3.1:1 ใช้กับข้อความประกอบเท่านั้น */
+  --text-faint: #706C61;
+  --text-faintest: #8D887B;
+  /* สีเขียวที่ใช้เป็น "ตัวหนังสือ" — แยกจาก --court-dark ที่ใช้ทำพื้น/ไล่สี
+     เพราะในธีมมืด court-dark เข้มเกินจะอ่านบนพื้นเข้ม (2.6:1) */
+  --court-ink: #0A4E43;
   --shadow: 0 8px 24px rgba(15, 107, 92, 0.14);
 
   --skill1-bg: #E6F4EE; --skill1-text: #1F7A56;
@@ -26,6 +31,19 @@
   --header-grad-start: var(--court);
   --header-grad-end: var(--court-dark);
   --header-text: #FAF7F0;
+
+  /* ฟอนต์ — mono ต่อท้ายด้วย Plex เพราะ JetBrains Mono ไม่มีอักษรไทย
+     ข้อความไทยใน .mono จะได้ไม่ตกไปใช้ฟอนต์ระบบคนละหน้าตา */
+  --font-body: 'IBM Plex Sans Thai', 'Sarabun', sans-serif;
+  --font-display: 'Kanit', 'IBM Plex Sans Thai', sans-serif;
+  --font-mono: 'JetBrains Mono', 'IBM Plex Sans Thai', monospace;
+
+  /* การกด — ใช้ทั้งแอป */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --press-scale: 0.97;
+  --press-duration: 160ms;
+  /* พื้นที่กดขั้นต่ำ — คนจัดก๊วนยืนใช้นิ้วโป้งมือเดียว */
+  --tap-min: 44px;
 
   color-scheme: light;
 }
@@ -44,8 +62,9 @@
   --border-muted: #24302A;
   --text: #EDEAE0;
   --text-muted: #A9B3AB;
-  --text-faint: #7C8A81;
-  --text-faintest: #5C6961;
+  --text-faint: #86938B;
+  --text-faintest: #6B776F;
+  --court-ink: #23A38B;
   --shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 
   --skill1-bg: rgba(31, 122, 86, 0.28); --skill1-text: #7BE8BA;
@@ -67,26 +86,68 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: 'IBM Plex Sans Thai', 'Sarabun', sans-serif;
+  font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 h1, h2, h3, .display {
-  font-family: 'Kanit', 'IBM Plex Sans Thai', sans-serif;
+  font-family: var(--font-display);
   font-weight: 700;
   margin: 0;
   letter-spacing: -0.01em;
 }
 
 .mono {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
 }
 
 button {
   font-family: inherit;
   cursor: pointer;
   border: none;
+  /* ปุ่มที่ประกาศ transition เองต้องใส่ scale ต่อท้ายเอง (shorthand ทับกัน) */
+  transition: scale var(--press-duration) var(--ease-out);
+}
+
+/* กดแล้วยุบลงนิด — บอกว่าแอปได้ยินนิ้วแล้ว ก่อนที่สปินเนอร์ของ server จะขึ้น
+   ใช้ property scale แยกจาก transform จะได้ไม่ชนกับปุ่มที่ใช้ transform อยู่แล้ว */
+button:not(:disabled):active,
+.btn-link:active {
+  scale: var(--press-scale);
+}
+
+/* บนจอสัมผัส: ไม่ต้องมีกล่องเทากะพริบทับปุ่ม (scale ข้างบนทำหน้าที่แทน)
+   และไม่ต้องรอดูว่าจะแตะสองครั้งเพื่อซูมหรือเปล่า */
+button,
+a,
+label,
+summary,
+[role='tab'] {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* ขยายพื้นที่กดของปุ่มเล็กให้ถึง --tap-min โดยหน้าตาไม่เปลี่ยน
+   ใส่คลาส .tap-target หรือเพิ่ม selector ในรายการนี้ */
+.tap-target,
+.btn-icon,
+.queue-mode-btn,
+.court-controls button {
+  position: relative;
+}
+
+.tap-target::after,
+.btn-icon::after,
+.queue-mode-btn::after,
+.court-controls button::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100%, var(--tap-min));
+  height: max(100%, var(--tap-min));
+  translate: -50% -50%;
 }
 
 button:focus-visible,
@@ -112,4 +173,15 @@ input, select {
 
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+
+  /* ลดการเคลื่อนไหว ≠ ไม่มี feedback — ตัวบอกว่ากำลังทำงานเปลี่ยนจากหมุนเป็นกะพริบจาง ๆ
+     (กฎ * ข้างบนทำให้สปินเนอร์หยุดนิ่ง ดูเหมือนแอปค้าง) */
+  .btn-spinner,
+  .btn-refresh.is-busy svg {
+    animation: busy-pulse 1.2s ease-in-out infinite !important;
+  }
+}
+
+@keyframes busy-pulse {
+  50% { opacity: 0.35; }
 }
