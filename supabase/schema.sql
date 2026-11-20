@@ -341,6 +341,49 @@ create trigger trg_players_updated_at
   before update on players
   for each row execute function set_updated_at();
 
+-- วันที่จบแล้ว: รายชื่อคนจ่ายต้องนิ่งเท่ายอดที่ close_session ล็อกไว้
+-- v_club_outstanding อ่าน status / paying สด ๆ — ถ้าแก้ "มา/ไม่มา" หรือ "แขกไม่จ่าย" ทีหลัง
+-- ยอดค้างจ่ายรวมจะไม่เท่า final_total_fee (หน้าจอกันไว้แล้ว แต่มือถือที่ค้างหน้าเก่ายังส่งมาได้)
+-- แก้ได้แค่ paid_at (โอนกันหลังเลิกเล่น) และ member_id (ระบบตั้งเป็น null เองตอนลบสมาชิก)
+-- ไม่เจอแถว session = กำลังลบทั้งวัน/ทั้งก๊วนอยู่ (cascade) ปล่อยผ่าน
+-- security definer: ต้องเห็นสถานะวันเสมอ ไม่ให้ RLS ซ่อนแถวแล้วหลุดการตรวจ
+create or replace function lock_closed_day_players()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_op = 'DELETE' then
+    if exists (select 1 from sessions where id = old.session_id and status = 'done') then
+      raise exception 'วันเล่นนี้จบแล้ว ลบผู้เล่นออกไม่ได้';
+    end if;
+    return old;
+  end if;
+
+  if tg_op = 'INSERT' then
+    if exists (select 1 from sessions where id = new.session_id and status = 'done') then
+      raise exception 'วันเล่นนี้จบแล้ว เพิ่มผู้เล่นไม่ได้';
+    end if;
+    return new;
+  end if;
+
+  -- UPDATE: แถวเดิมอยู่ในวันที่จบแล้ว หรือกำลังถูกย้ายเข้าวันที่จบแล้ว
+  if exists (
+    select 1 from sessions
+    where id in (old.session_id, new.session_id) and status = 'done'
+  ) and to_jsonb(new) - '{paid_at,member_id,updated_at}'::text[]
+        is distinct from to_jsonb(old) - '{paid_at,member_id,updated_at}'::text[] then
+    raise exception 'วันเล่นนี้จบแล้ว แก้ได้เฉพาะสถานะจ่ายเงิน';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger trg_players_lock_closed_day
+  before insert or update or delete on players
+  for each row execute function lock_closed_day_players();
+
 
 -- ------------------------------------------------------------
 -- courts — คอร์ตที่จองไว้ในวันนั้น 1 แถว = 1 การจอง
