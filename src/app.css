@@ -44,7 +44,8 @@
   letter-spacing: -0.01em;
 }
 
-.brand-mark { font-size: 1.15rem; line-height: 1; }
+/* โลโก้ (Logo.jsx) ใช้ currentColor — เป็นสีตัวหนังสือของแถบหัวเอง หัวจุกเป็น --cork */
+.brand-mark { flex: none; display: block; }
 
 .app-nav {
   display: flex;
@@ -2166,10 +2167,10 @@
   position: absolute;
   right: 18px;
   top: 14px;
-  font-size: 4.4rem;
-  line-height: 1;
+  width: 4.6rem;
+  height: 4.6rem;
+  /* ลายน้ำ: จาง ๆ ทั้งตัวรวมหัวจุก — โลโก้เอียงในตัวอยู่แล้ว ไม่ต้องหมุนเพิ่ม */
   opacity: 0.22;
-  transform: rotate(18deg);
   pointer-events: none;
 }
 
@@ -2604,7 +2605,7 @@
   .auth-screen { padding: 20px 16px 36px; }
   .auth-brand { padding: 26px 20px 22px; }
   .auth-body { padding: 22px 20px 26px; }
-  .auth-shuttle { font-size: 3.4rem; }
+  .auth-shuttle { width: 3.6rem; height: 3.6rem; }
 
   /* ฟอร์ม: ทุกช่องเต็มความกว้าง ไม่บีบกันจนกดยาก */
   .day-form { padding: 14px; gap: 14px; }

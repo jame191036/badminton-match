@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import ThemeToggle from './ThemeToggle'
+import Logo from './Logo'
 import PasswordField from './PasswordField'
 import { Mail } from 'lucide-react'
 
@@ -63,7 +64,7 @@ export default function Login({ onSignIn, onSignUp, onForgotPassword, theme, onT
 
       <div className="auth-card">
         <div className="auth-brand">
-          <span className="auth-shuttle" aria-hidden="true">🏸</span>
+          <Logo className="auth-shuttle" size={72} />
           <span className="eyebrow mono">จัดก๊วนแบด</span>
           <h1 className="display">จับคู่ลงคอร์ต</h1>
           <p className="auth-tagline">
