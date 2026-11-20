@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { computeBilling, isPayer, toNumber } from '../utils/billing'
+import { SPLIT_MODES, computeBilling, isPayer, toNumber } from '../utils/billing'
+import NameText from './NameText'
 
 function formatBaht(n) {
   return n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -53,13 +54,16 @@ export default function BillingPanel({
   courts,
   readOnly = false,
   billing,
+  splitMode = 'equal',
   onChangeBilling,
+  onChangeSplitMode,
   onTogglePaying,
   onChangeCourtHours,
 }) {
-  // สูตรอยู่ที่ utils/billing.js ที่เดียว (แท็บเก็บเงินใช้ตัวเดียวกัน) — ต้องตรงกับ v_billing_summary
-  const { hourlyRate, shuttleCount, totalHours, courtTotal, shuttleTotal, total, payerCount, perPerson: perTotal } =
-    computeBilling({ players, courts, billing })
+  // สูตรอยู่ที่ utils/billing.js ที่เดียว (รายงาน PDF/รูปใช้ตัวเดียวกัน) — ยอดรวมต้องตรงกับ v_billing_summary
+  const { hourlyRate, shuttleCount, totalHours, courtTotal, shuttleTotal, total, payerCount, perPerson, perGame, payerGames, shares } =
+    computeBilling({ players, courts, billing, splitMode })
+  const byGames = splitMode === 'games'
 
   // คนที่กด "ไม่มา" ไม่ถูกนับทั้งตัวหารและรายชื่อ
   const present = players.filter((p) => p.status !== 'absent')
@@ -132,6 +136,26 @@ export default function BillingPanel({
         </label>
       </div>
 
+      {/* วิธีหาร — ปุ่มเรียงแบบเดียวกับ "วิธีจับคู่" ในแท็บคอร์ต · เปลี่ยนได้จนกว่าจะจบวัน */}
+      <h3 className="billing-group-title">วิธีหาร</h3>
+      <div className="queue-mode billing-split">
+        <div className="queue-mode-options" role="group" aria-label="วิธีหาร">
+          {SPLIT_MODES.map((m) => (
+            <button
+              key={m.value}
+              type="button"
+              className={`queue-mode-btn ${splitMode === m.value ? 'active' : ''}`}
+              aria-pressed={splitMode === m.value}
+              disabled={readOnly}
+              onClick={() => onChangeSplitMode(m.value)}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <span className="queue-mode-hint">{SPLIT_MODES.find((m) => m.value === splitMode)?.hint}</span>
+      </div>
+
       <div className="billing-summary">
         <div className="billing-summary-row">
           <span>
@@ -147,15 +171,34 @@ export default function BillingPanel({
           <span>ยอดรวมทั้งหมด</span>
           <span className="mono">{formatBaht(total)} บาท</span>
         </div>
-        <div className="billing-summary-row">
-          <span>หารเท่ากันระหว่าง</span>
-          <span className="mono">{payerCount} คน</span>
-        </div>
-        <div className="billing-summary-row highlight">
-          <span>ต่อคน</span>
-          <span className="mono">{formatBaht(perTotal)} บาท</span>
-        </div>
+        {byGames ? (
+          <>
+            {/* หนึ่งเกมมี 4 คน — 5 เกมจึงเป็น 20 ส่วน ใครเล่นกี่เกมก็จ่ายกี่ส่วน */}
+            <div className="billing-summary-row">
+              <span>เกมของผู้ร่วมจ่ายรวมกัน</span>
+              <span className="mono">{payerGames} เกม</span>
+            </div>
+            <div className="billing-summary-row highlight">
+              <span>เกมละ (ต่อคน)</span>
+              <span className="mono">{formatBaht(perGame)} บาท</span>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="billing-summary-row">
+              <span>หารเท่ากันระหว่าง</span>
+              <span className="mono">{payerCount} คน</span>
+            </div>
+            <div className="billing-summary-row highlight">
+              <span>ต่อคน</span>
+              <span className="mono">{formatBaht(perPerson)} บาท</span>
+            </div>
+          </>
+        )}
       </div>
+      {byGames && payerGames === 0 && total > 0 && (
+        <p className="panel-hint">ยังไม่มีเกมที่จบ — ยอดรายคนจะขึ้นเมื่อจบเกมแรก</p>
+      )}
 
       <div className="billing-players">
         <h3>ผู้ร่วมจ่าย ({payerCount}/{present.length})</h3>
@@ -171,10 +214,17 @@ export default function BillingPanel({
                     disabled={readOnly}
                     onChange={() => onTogglePaying(p.id)}
                   />
-                  <span>{p.name}</span>
+                  {/* ห่ออีกชั้นเพราะ label เป็น flex — ไม่งั้นช่องว่างในชื่อหาย */}
+                  <span>
+                    <NameText name={p.name} />
+                  </span>
                 </label>
                 <span className="billing-amount mono">
-                  {isPaying ? `${formatBaht(perTotal)} บาท` : 'ไม่ร่วมจ่าย'}
+                  {!isPaying
+                    ? 'ไม่ร่วมจ่าย'
+                    : byGames
+                      ? `${p.gamesPlayed} เกม · ${formatBaht(shares.get(p.id) ?? 0)} บาท`
+                      : `${formatBaht(perPerson)} บาท`}
                 </span>
               </li>
             )

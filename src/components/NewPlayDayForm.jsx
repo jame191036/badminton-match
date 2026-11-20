@@ -7,6 +7,7 @@ import SearchSelect from './SearchSelect'
 import SearchBox from './SearchBox'
 import DatePicker from './DatePicker'
 import { IGNORES_FORCE_REST, QUEUE_MODES, skillLabel } from '../utils/pairing'
+import { SPLIT_MODES } from '../utils/billing'
 import { addDays, addHours, clock, hoursBetween, thaiDate, todayISO } from '../utils/date'
 
 // เวลาเริ่มที่ก๊วนแบดใช้กันจริง ๆ และความยาวที่จองกันบ่อย
@@ -53,6 +54,8 @@ export default function NewPlayDayForm({
   const [shuttlePrice, setShuttlePrice] = useState(initial?.shuttlePrice ?? '')
   const [queueMode, setQueueMode] = useState(initial?.queueMode ?? 'rotate')
   const [forceRest, setForceRest] = useState(initial?.forceRest ?? true)
+  // วิธีหารเงิน — วันใหม่ใช้แบบเดียวกับวันก่อน (last_day_defaults) เปลี่ยนได้อีกในแท็บหารเงิน
+  const [splitMode, setSplitMode] = useState(initial?.splitMode ?? 'equal')
   const [memberQuery, setMemberQuery] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -78,6 +81,7 @@ export default function NewPlayDayForm({
         setShuttlePrice(d.shuttle_price ? String(d.shuttle_price) : '')
         setQueueMode(d.queue_mode ?? 'rotate')
         setForceRest(d.force_rest ?? true)
+        setSplitMode(d.split_mode ?? 'equal')
         if (Array.isArray(d.courts) && d.courts.length > 0) {
           setCourts(d.courts.map((c) => ({ name: c.name, hours: String(c.hours ?? '') })))
         }
@@ -153,6 +157,7 @@ export default function NewPlayDayForm({
         shuttleCount: shuttleCount === '' ? 0 : Number(shuttleCount),
         queueMode,
         forceRest,
+        splitMode,
         memberIds: initial ? undefined : [...selected],
         courts: cleanCourts,
       })
@@ -558,6 +563,17 @@ export default function NewPlayDayForm({
                 : 'ปิดแล้วคู่จะหลากหลายกว่า แต่คนเพิ่งเล่นจบอาจได้ลงต่อเลย'}
             </span>
           </span>
+        </label>
+
+        <label className="field">
+          <span className="field-label">วิธีหารเงิน</span>
+          <select value={splitMode} onChange={(e) => setSplitMode(e.target.value)}>
+            {SPLIT_MODES.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label} — {m.hint}
+              </option>
+            ))}
+          </select>
         </label>
       </Step>
 

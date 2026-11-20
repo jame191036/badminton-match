@@ -176,6 +176,7 @@ begin
     'shuttle_price', v_last.shuttle_price,
     'queue_mode', v_last.queue_mode,
     'force_rest', v_last.force_rest,
+    'split_mode', v_last.split_mode,
     'courts', (
       select coalesce(json_agg(json_build_object('name', c.name, 'hours', c.hours)
                                order by c.sort_order), '[]'::json)
@@ -199,6 +200,9 @@ $$;
 -- p_courts รูปแบบ: [{"name": "คอร์ต 1", "hours": 2}, ...]
 -- master ที่เลือกได้ต้องเป็นของ "เจ้าของก๊วน" เสมอ แม้คนสร้างจะเป็น editor
 -- ------------------------------------------------------------
+-- ตัวเก่าก่อนมี p_split_mode (121) — ค้างไว้สองตัว PostgREST จะเลือกไม่ถูกว่าเรียกตัวไหน
+drop function if exists create_play_day(uuid, date, time, time, uuid, uuid, uuid, numeric, numeric, int, text, uuid[], jsonb, text, boolean);
+
 create or replace function create_play_day(
   p_club_id uuid,
   p_play_date date,
@@ -214,7 +218,8 @@ create or replace function create_play_day(
   p_member_ids uuid[] default '{}',
   p_courts jsonb default null,
   p_note text default null,
-  p_force_rest boolean default true
+  p_force_rest boolean default true,
+  p_split_mode text default 'equal'
 )
 returns uuid
 language plpgsql
@@ -272,7 +277,7 @@ begin
     club_id, venue_id, venue_name,
     shuttle_brand_id, shuttle_model_id, shuttle_brand_name,
     play_date, start_time, end_time, status,
-    hourly_rate, shuttle_price, shuttle_count, queue_mode, force_rest, note
+    hourly_rate, shuttle_price, shuttle_count, queue_mode, force_rest, split_mode, note
   )
   values (
     p_club_id, p_venue_id, v_venue_name,
@@ -285,6 +290,7 @@ begin
     coalesce(p_shuttle_count, 0),
     coalesce(p_queue_mode, 'sequential'),
     coalesce(p_force_rest, true),
+    coalesce(p_split_mode, 'equal'),
     nullif(trim(coalesce(p_note, '')), '')
   )
   returning id into v_session_id;
@@ -329,6 +335,8 @@ $$;
 --   playing   ราคาแก้ได้ในแท็บหารเงินอยู่แล้ว วันที่/สนามไม่ควรขยับกลางคัน
 --   done      ยอดถูก freeze แล้ว แก้ย้อนหลัง = ประวัติเพี้ยน
 -- ------------------------------------------------------------
+drop function if exists update_play_day(uuid, date, time, time, uuid, uuid, uuid, numeric, numeric, int, text, jsonb, text, boolean);
+
 create or replace function update_play_day(
   p_session_id uuid,
   p_play_date date,
@@ -343,7 +351,8 @@ create or replace function update_play_day(
   p_queue_mode text default 'sequential',
   p_courts jsonb default null,
   p_note text default null,
-  p_force_rest boolean default true
+  p_force_rest boolean default true,
+  p_split_mode text default 'equal'
 )
 returns void
 language plpgsql
@@ -415,6 +424,7 @@ begin
       shuttle_count      = coalesce(p_shuttle_count, 0),
       queue_mode         = coalesce(p_queue_mode, 'sequential'),
       force_rest         = coalesce(p_force_rest, true),
+      split_mode         = coalesce(p_split_mode, 'equal'),
       note               = nullif(trim(coalesce(p_note, '')), '')
   where id = p_session_id;
 
@@ -1075,8 +1085,8 @@ grant execute on function revoke_club_access(uuid, uuid) to authenticated;
 grant execute on function list_club_members(uuid) to authenticated;
 
 grant execute on function last_day_defaults(uuid) to authenticated;
-grant execute on function create_play_day(uuid, date, time, time, uuid, uuid, uuid, numeric, numeric, int, text, uuid[], jsonb, text, boolean) to authenticated;
-grant execute on function update_play_day(uuid, date, time, time, uuid, uuid, uuid, numeric, numeric, int, text, jsonb, text, boolean) to authenticated;
+grant execute on function create_play_day(uuid, date, time, time, uuid, uuid, uuid, numeric, numeric, int, text, uuid[], jsonb, text, boolean, text) to authenticated;
+grant execute on function update_play_day(uuid, date, time, time, uuid, uuid, uuid, numeric, numeric, int, text, jsonb, text, boolean, text) to authenticated;
 grant execute on function start_play_day(uuid) to authenticated;
 grant execute on function cancel_play_day(uuid) to authenticated;
 grant execute on function close_session(uuid) to authenticated;

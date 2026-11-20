@@ -63,7 +63,7 @@ function roundRect(ctx, x, y, w, h, r) {
 export async function renderReportImage(report) {
   if (document.fonts?.ready) await document.fonts.ready
 
-  const cols = reportColumns()
+  const cols = reportColumns(report)
   const rowH = 54
   const tileH = 132
 

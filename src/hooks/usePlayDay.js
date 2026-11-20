@@ -17,6 +17,8 @@ function mapDay(row) {
     queueMode: row.queue_mode ?? 'sequential',
     // บังคับพัก 1 เกมก่อนลงใหม่ — แยกจากโหมดคิว ใช้ได้กับทั้งสองโหมด
     forceRest: row.force_rest ?? true,
+    // วิธีหารเงิน: 'equal' หารเท่ากัน | 'games' หารตามเกม (สูตรอยู่ใน utils/billing.js)
+    splitMode: row.split_mode ?? 'equal',
     finals: {
       totalFee: Number(row.final_total_fee ?? 0),
       perPerson: Number(row.final_per_person ?? 0),
@@ -35,7 +37,7 @@ export function usePlayDay(sessionId) {
   const [day, setDay] = useState(null)
   const [role, setRole] = useState(null)
   const [ownerId, setOwnerId] = useState(null)
-  // ชื่อก๊วนและพร้อมเพย์ — ใช้ในข้อความสรุปยอดและ QR ของแท็บเก็บเงิน
+  // ชื่อก๊วน — ใช้เป็นหัวรายงาน PDF/รูป
   const [clubInfo, setClubInfo] = useState(null)
   const [billing, setBilling] = useState({ hourlyRate: '', shuttlePrice: '', shuttleCount: '' })
   // คอร์ตที่จองของวันนี้ — หน้าแก้ไขต้องใช้ ส่วนกระดานใช้ชุดของ useBadmintonData
@@ -86,7 +88,7 @@ export function usePlayDay(sessionId) {
         // viewer เห็นปุ่มแล้วกดไม่ได้ จะดูเหมือนแอปพัง ทั้งที่ RLS ทำงานถูก
         const { data: clubRow } = await supabase
           .from('v_my_clubs')
-          .select('role, owner_id, name, promptpay_id, promptpay_name')
+          .select('role, owner_id, name')
           .eq('id', data.club_id)
           .maybeSingle()
 
@@ -94,11 +96,7 @@ export function usePlayDay(sessionId) {
         setRole(clubRow?.role ?? null)
         // ข้อมูลหลักผูกกับบัญชีเจ้าของก๊วน ไม่ใช่คนที่ล็อกอินอยู่
         setOwnerId(clubRow?.owner_id ?? null)
-        setClubInfo(
-          clubRow
-            ? { name: clubRow.name, promptpayId: clubRow.promptpay_id, promptpayName: clubRow.promptpay_name }
-            : null,
-        )
+        setClubInfo(clubRow ? { name: clubRow.name } : null)
       }
       setLoading(false)
     }
@@ -203,14 +201,14 @@ export function usePlayDay(sessionId) {
    * patch เป็นชื่อคอลัมน์จริง (snake_case) ส่วน local เป็นชื่อในรูปแบบที่
    * component ใช้ (camelCase) เขียนรวมกันเพราะสองปุ่มนี้ต่างกันแค่ชื่อคอลัมน์
    */
-  const updateQueueSetting = useCallback(
-    async (patch, local) => {
+  const updateDaySetting = useCallback(
+    async (patch, local, what) => {
       setDay((prev) => (prev ? { ...prev, ...local } : prev))
       if (!sessionId) return
       const { error: err } = await supabase.from('sessions').update(patch).eq('id', sessionId)
       if (err) {
         console.error(err)
-        setSaveError(`เปลี่ยนวิธีจับคู่ไม่สำเร็จ: ${err.message}`)
+        setSaveError(`เปลี่ยน${what}ไม่สำเร็จ: ${err.message}`)
       } else {
         setSaveError('')
       }
@@ -219,13 +217,19 @@ export function usePlayDay(sessionId) {
   )
 
   const updateQueueMode = useCallback(
-    (mode) => updateQueueSetting({ queue_mode: mode }, { queueMode: mode }),
-    [updateQueueSetting],
+    (mode) => updateDaySetting({ queue_mode: mode }, { queueMode: mode }, 'วิธีจับคู่'),
+    [updateDaySetting],
   )
 
   const updateForceRest = useCallback(
-    (on) => updateQueueSetting({ force_rest: on }, { forceRest: on }),
-    [updateQueueSetting],
+    (on) => updateDaySetting({ force_rest: on }, { forceRest: on }, 'วิธีจับคู่'),
+    [updateDaySetting],
+  )
+
+  // วันที่จบแล้วเปลี่ยนไม่ได้ (trigger ฝั่ง DB) — หน้าจอก็ซ่อนแท็บหารเงินของวันที่จบแล้วอยู่แล้ว
+  const updateSplitMode = useCallback(
+    (mode) => updateDaySetting({ split_mode: mode }, { splitMode: mode }, 'วิธีหารเงิน'),
+    [updateDaySetting],
   )
 
   const startDay = useCallback(async () => {
@@ -262,6 +266,7 @@ export function usePlayDay(sessionId) {
     updateBilling,
     updateQueueMode,
     updateForceRest,
+    updateSplitMode,
     startDay,
     closeDay,
     refetch,

@@ -72,6 +72,7 @@ export default function EditPlayDayPage() {
           shuttleCount: billing.shuttleCount,
           queueMode: day.queueMode,
           forceRest: day.forceRest,
+          splitMode: day.splitMode,
           courts: courts.map((c) => ({ name: c.name, hours: String(c.hours ?? '') })),
         }}
         onSubmit={async (payload) => {

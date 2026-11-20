@@ -10,12 +10,10 @@ import CourtBoard from '../components/CourtBoard'
 import MatchHistory from '../components/MatchHistory'
 import SessionStats from '../components/SessionStats'
 import BillingPanel from '../components/BillingPanel'
-import PaymentPanel from '../components/PaymentPanel'
 import DayReport from '../components/DayReport'
 import ExportReport from '../components/ExportReport'
 import { buildDayReport } from '../utils/report'
-import { useClubOutstanding } from '../hooks/useClubOutstanding'
-import { computeBilling, isPayer } from '../utils/billing'
+import { computeBilling, formatBaht, isPayer, splitShares } from '../utils/billing'
 import { SkeletonCourts, SkeletonHead, SkeletonQueue } from '../components/Skeleton'
 import { useConfirm } from '../hooks/useConfirm'
 import AsyncButton from '../components/AsyncButton'
@@ -28,8 +26,6 @@ const DAY_TABS = [
   { id: 'board', label: 'คอร์ต', count: (c) => (c.playing > 0 ? c.playing : null) },
   { id: 'players', label: 'ผู้เล่น', count: (c) => (c.waiting > 0 ? c.waiting : null) },
   { id: 'billing', label: 'หารเงิน', count: () => null },
-  // จำนวนคนที่ยังไม่จ่าย — เห็นจากทุกแท็บว่ายังเก็บเงินไม่ครบ
-  { id: 'collect', label: 'เก็บเงิน', count: (c) => (c.unpaid > 0 ? c.unpaid : null) },
   { id: 'stats', label: 'สถิติ', count: () => null },
   { id: 'history', label: 'ประวัติ', count: (c) => (c.games > 0 ? c.games : null) },
 ]
@@ -63,13 +59,13 @@ export default function PlayDayPage() {
     updateBilling,
     updateQueueMode,
     updateForceRest,
+    updateSplitMode,
     startDay,
     closeDay,
     refetch: refetchDay,
   } = usePlayDay(sessionId)
 
   const isLive = day?.status === 'playing'
-  const outstanding = useClubOutstanding(clubId)
   const {
     players,
     courts,
@@ -113,27 +109,14 @@ export default function PlayDayPage() {
    *   หารเงิน — BillingPanel คำนวณสดจากราคาปัจจุบัน ซึ่งอาจไม่ตรงกับยอดที่
    *             freeze ไว้ ยอดจริงแสดงอยู่ในกล่อง "ยอดที่ล็อกไว้" ด้านบนแล้ว
    */
-  // วันที่จองไว้ยังไม่มีอะไรให้เก็บเงิน — แท็บเก็บเงินโผล่ตั้งแต่เริ่มเล่น และยังอยู่หลังจบวัน
-  // เพราะส่วนใหญ่โอนกันหลังเลิกเล่น
-  const tabs = isClosed
-    ? DAY_TABS.filter((t) => t.id !== 'board' && t.id !== 'billing')
-    : day?.status === 'planned'
-      ? DAY_TABS.filter((t) => t.id !== 'collect')
-      : DAY_TABS
+  const tabs = isClosed ? DAY_TABS.filter((t) => t.id !== 'board' && t.id !== 'billing') : DAY_TABS
 
-  // เก็บเงิน: วันที่จบแล้วใช้ยอดที่ freeze ไว้ ไม่งั้นใช้ยอดสดสูตรเดียวกับแท็บหารเงิน
-  const payers = players.filter(isPayer)
-  const live = computeBilling({ players, courts, billing })
-  const perPerson = isClosed ? day.finals.perPerson : live.perPerson
-  const payTotal = isClosed ? day.finals.totalFee : live.total
-  // ยอดค้างจากวันก่อน ๆ ของคนที่มาวันนี้ — ไม่นับวันนี้เอง
-  const priorByMember = new Map(
-    outstanding.groups
-      .filter((g) => g.memberId)
-      .map((g) => [g.memberId, { ...g, days: g.days.filter((d) => d.sessionId !== sessionId) }])
-      .filter(([, g]) => g.days.length > 0)
-      .map(([id, g]) => [id, { ...g, total: g.days.reduce((a, d) => a + d.amount, 0) }]),
-  )
+  // ยอดสดสูตรเดียวกับแท็บหารเงิน — ใช้ในรายงาน PDF/รูปของวันที่ยังไม่จบ
+  const splitMode = day?.splitMode ?? 'equal'
+  const live = computeBilling({ players, courts, billing, splitMode })
+  // วันที่จบแล้ว + หารตามเกม: ยอดรายคนคิดจากยอดรวมที่ล็อกไว้ (ผู้เล่นของวันที่จบแล้วถูกล็อกด้วย)
+  const frozenShares =
+    isClosed && splitMode === 'games' ? splitShares({ players, total: day.finals.totalFee, splitMode }) : null
 
   // เลือกแท็บที่ยังมีอยู่จริง — ค่าตั้งต้น 'board' ใช้กับวันที่จบแล้วไม่ได้
   const activeTab = tabs.some((t) => t.id === tab) ? tab : tabs[0].id
@@ -148,7 +131,6 @@ export default function PlayDayPage() {
     // ใช้ยอดจาก view ไม่ใช่ history.length เพราะ history ดึงมาแค่ 30 แถวล่าสุด
     // ตัวเลขบนแท็บจะได้ไม่ค้างที่ 30 ทั้งที่เล่นไปมากกว่านั้น
     games: summary?.finishedGames ?? 0,
-    unpaid: payers.filter((p) => !p.paidAt).length,
   }
 
   async function run(fn) {
@@ -332,10 +314,17 @@ export default function PlayDayPage() {
                 <span>ยอดรวม</span>
                 <strong>{day.finals.totalFee.toLocaleString('th-TH')} บาท</strong>
               </li>
-              <li>
-                <span>คนละ</span>
-                <strong>{day.finals.perPerson.toLocaleString('th-TH')} บาท</strong>
-              </li>
+              {frozenShares ? (
+                <li>
+                  <span>เกมละ (ต่อคน)</span>
+                  <strong>{formatBaht(frozenShares.perGame)} บาท</strong>
+                </li>
+              ) : (
+                <li>
+                  <span>คนละ</span>
+                  <strong>{day.finals.perPerson.toLocaleString('th-TH')} บาท</strong>
+                </li>
+              )}
               {/* ตัวหารไม่เท่ากับจำนวนผู้เล่นเสมอไป (มีคนไม่ร่วมจ่ายได้)
                   ถ้าไม่บอก 9 คน × 130 จะไม่เท่ายอดรวมแล้วดูเหมือนคิดผิด */}
               <li>
@@ -351,8 +340,26 @@ export default function PlayDayPage() {
                 <strong>{day.finals.gameCount} เกม</strong>
               </li>
             </ul>
+            {/* หารตามเกม: แต่ละคนจ่ายไม่เท่ากัน และแท็บหารเงินถูกซ่อนในวันที่จบแล้ว
+                รายคนจึงต้องอยู่ตรงนี้ ไม่งั้นไม่มีที่ไหนบอกว่าใครต้องจ่ายเท่าไร */}
+            {frozenShares && (
+              <ul className="frozen-shares">
+                {players
+                  .filter(isPayer)
+                  .sort((a, b) => b.gamesPlayed - a.gamesPlayed)
+                  .map((p) => (
+                    <li key={p.id}>
+                      <span>{p.name}</span>
+                      <span className="mono">
+                        {p.gamesPlayed} เกม · {formatBaht(frozenShares.shares.get(p.id) ?? 0)} บาท
+                      </span>
+                    </li>
+                  ))}
+              </ul>
+            )}
             <p className="panel-hint">
               ยอดของวันที่จบแล้วถูกแช่ไว้ ไม่เปลี่ยนตามราคาสนามที่แก้ทีหลัง
+              {frozenShares && ' · หารตามจำนวนเกมที่แต่ละคนเล่น'}
             </p>
           </div>
         )}
@@ -485,7 +492,9 @@ export default function PlayDayPage() {
                 courts={courts}
                 readOnly={!canEdit}
                 billing={billing}
+                splitMode={splitMode}
                 onChangeBilling={updateBilling}
+                onChangeSplitMode={updateSplitMode}
                 onTogglePaying={togglePaying}
                 onChangeCourtHours={updateCourtHours}
               />
@@ -498,27 +507,6 @@ export default function PlayDayPage() {
               <h2>{isClosed ? 'สถิติของวันเล่นนี้' : 'สถิติวันนี้'}</h2>
               <ExportReport report={report} />
               <SessionStats players={players} summary={summary} />
-            </section>
-          )}
-
-          {activeTab === 'collect' && (
-            <section className="panel">
-              <h2>เก็บเงิน</h2>
-              <PaymentPanel
-                payers={payers}
-                perPerson={perPerson}
-                total={payTotal}
-                live={!isClosed}
-                // ติ๊กจ่ายได้แม้วันจบแล้ว (โอนกันทีหลัง) — viewer แก้ไม่ได้
-                readOnly={!canEdit}
-                prior={priorByMember}
-                club={clubInfo}
-                dateLabel={thaiDate(day.playDate, { weekday: 'short', day: 'numeric', month: 'short' })}
-                onSetPaid={async (ids, paid) => {
-                  await outstanding.setPaid(ids, paid)
-                  await refreshBoard()
-                }}
-              />
             </section>
           )}
 

@@ -263,6 +263,12 @@ create table sessions (
   -- ค่าลูก = shuttle_count × shuttle_price
   shuttle_price      numeric(10,2) not null default 0 check (shuttle_price >= 0),
   shuttle_count      int           not null default 0 check (shuttle_count >= 0),
+  -- วิธีหารยอดรวม (คนจัดเลือกเองต่อวัน):
+  --   equal  หารเท่ากันทุกคนที่มาและร่วมจ่าย (คนนั่งพักทั้งวันก็จ่ายเท่ากัน)
+  --   games  หารทั้งก้อนตามสัดส่วนเกมที่เล่น: คนละ = รวม × เกมของคนนั้น ÷ เกมรวมของผู้ร่วมจ่าย
+  -- สูตรอยู่ที่ splitShares ใน src/utils/billing.js ที่เดียว (SQL เก็บแค่ว่าเลือกแบบไหน)
+  split_mode         text not null default 'equal'
+                       check (split_mode in ('equal', 'games')),
 
   -- วิธีเลือกผู้เล่นลงคอร์ต — logic จริงอยู่ใน src/utils/pairing.js
   queue_mode         text not null default 'sequential'
@@ -299,6 +305,24 @@ create unique index uq_one_playing_day_per_club
 create trigger trg_sessions_updated_at
   before update on sessions
   for each row execute function set_updated_at();
+
+-- วันที่จบแล้วเปลี่ยนวิธีหารไม่ได้ — ยอดรายคนของวันนั้นคิดจาก final_total_fee ที่ล็อกไว้
+-- กับวิธีหารนี้ ถ้าสลับวิธีทีหลัง ยอดรายคนจะเปลี่ยนทั้งที่จ่ายกันไปแล้ว
+create or replace function lock_closed_day_split()
+returns trigger
+language plpgsql
+as $$
+begin
+  if old.status = 'done' and new.split_mode is distinct from old.split_mode then
+    raise exception 'วันเล่นนี้จบแล้ว เปลี่ยนวิธีหารเงินไม่ได้';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger trg_sessions_lock_closed_split
+  before update on sessions
+  for each row execute function lock_closed_day_split();
 
 
 -- ------------------------------------------------------------
@@ -341,10 +365,12 @@ create trigger trg_players_updated_at
   before update on players
   for each row execute function set_updated_at();
 
--- วันที่จบแล้ว: รายชื่อคนจ่ายต้องนิ่งเท่ายอดที่ close_session ล็อกไว้
--- v_club_outstanding อ่าน status / paying สด ๆ — ถ้าแก้ "มา/ไม่มา" หรือ "แขกไม่จ่าย" ทีหลัง
--- ยอดค้างจ่ายรวมจะไม่เท่า final_total_fee (หน้าจอกันไว้แล้ว แต่มือถือที่ค้างหน้าเก่ายังส่งมาได้)
--- แก้ได้แค่ paid_at (โอนกันหลังเลิกเล่น) และ member_id (ระบบตั้งเป็น null เองตอนลบสมาชิก)
+-- วันที่จบแล้ว: ผู้เล่นต้องนิ่ง ยอดรายคนจะได้ไม่ขยับ
+-- ยอดรายคนของวันที่จบแล้ว = final_total_fee ที่ล็อกไว้ หารตาม status / paying / games_played
+-- ของแถวเหล่านี้ (ดู splitShares) — ถ้าแก้ "มา/ไม่มา" หรือ "แขกไม่จ่าย" ทีหลัง ผลรวมรายคน
+-- จะไม่เท่ายอดที่ล็อก (หน้าจอกันไว้แล้ว แต่มือถือที่ค้างหน้าเก่ายังส่งมาได้)
+-- แก้ได้แค่ paid_at (ข้อมูลเก่าของฟีเจอร์เก็บเงินที่เอาออกแล้ว) และ member_id
+-- (ระบบตั้งเป็น null เองตอนลบสมาชิก)
 -- ไม่เจอแถว session = กำลังลบทั้งวัน/ทั้งก๊วนอยู่ (cascade) ปล่อยผ่าน
 -- security definer: ต้องเห็นสถานะวันเสมอ ไม่ให้ RLS ซ่อนแถวแล้วหลุดการตรวจ
 create or replace function lock_closed_day_players()
@@ -705,11 +731,14 @@ select
   s.shuttle_brand_name,
   s.closed_at,
   case when s.status = 'done' then s.final_total_fee    else b.total_fee    end as total_fee,
-  case when s.status = 'done' then s.final_per_person   else b.per_person   end as per_person,
+  -- หารตามเกม = แต่ละคนจ่ายไม่เท่ากัน ไม่มี "คนละ" ตัวเดียว (null — หน้าจอเขียนว่า "ตามเกม")
+  case when s.split_mode = 'games' then null
+       when s.status = 'done' then s.final_per_person   else b.per_person   end as per_person,
   case when s.status = 'done' then s.final_total_hours  else b.total_hours  end as total_hours,
   case when s.status = 'done' then s.final_player_count else sm.player_count end as player_count,
   case when s.status = 'done' then s.final_game_count   else sm.finished_games end as game_count,
-  case when s.status = 'done' then s.final_play_minutes else round(sm.total_play_minutes) end as play_minutes
+  case when s.status = 'done' then s.final_play_minutes else round(sm.total_play_minutes) end as play_minutes,
+  s.split_mode
 from sessions s
 left join v_billing_summary b on b.session_id = s.id
 left join v_session_summary sm on sm.session_id = s.id
@@ -739,27 +768,6 @@ from members mb
 left join players p on p.member_id = mb.id and p.status <> 'absent'
 left join sessions s on s.id = p.session_id and s.status = 'done'
 group by mb.id;
-
--- ยอดค้างจ่าย: หนึ่งแถวต่อคนต่อวันที่ยังไม่จ่าย ของวันที่จบแล้วเท่านั้น
--- (วันที่ยังเล่นอยู่ยอดยังเปลี่ยนได้ จึงไม่นับเป็นหนี้)
--- ใช้ยอดที่ freeze ไว้ (final_per_person) ไม่คำนวณใหม่ — แบบเดียวกับ v_club_days
--- ฝั่งแอปรวมเป็นรายคนเอง: สมาชิกรวมด้วย member_id ข้ามวัน แขกแยกเป็นรายวัน
-create or replace view v_club_outstanding as
-select
-  s.club_id,
-  s.id               as session_id,
-  s.play_date,
-  p.id               as player_id,
-  p.member_id,
-  p.name,
-  s.final_per_person as amount
-from players p
-join sessions s on s.id = p.session_id
-where s.status = 'done'
-  and p.paying
-  and p.status <> 'absent'
-  and p.paid_at is null
-  and s.final_per_person > 0;
 
 -- ก๊วนที่ฉันเข้าถึงได้ พร้อมบทบาทและวันเล่นล่าสุด/ถัดไป
 create or replace view v_my_clubs as
@@ -799,7 +807,6 @@ alter view v_session_summary      set (security_invoker = on);
 alter view v_pair_history         set (security_invoker = on);
 alter view v_club_days            set (security_invoker = on);
 alter view v_member_stats         set (security_invoker = on);
-alter view v_club_outstanding     set (security_invoker = on);
 alter view v_my_clubs             set (security_invoker = on);
 
 
