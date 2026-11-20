@@ -12,7 +12,7 @@ import { reportColumns } from '../utils/report'
  * ใช้ข้อมูลชุดเดียวกับรูป PNG (buildDayReport) ตัวเลขจึงตรงกันแน่นอน
  */
 export default function DayReport({ report }) {
-  const cols = reportColumns()
+  const cols = reportColumns(report)
 
   return (
     <div className="print-only day-report">

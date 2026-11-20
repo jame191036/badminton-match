@@ -13,7 +13,6 @@ function mapPlayer(row) {
     status: row.status,
     gamesPlayed: row.games_played,
     paying: row.paying,
-    paidAt: row.paid_at,
     queuedAt: row.queue_seq,
   }
 }

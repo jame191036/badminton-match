@@ -4,7 +4,6 @@ import { useClubDays } from '../hooks/useClubDays'
 import { usePastDays } from '../hooks/usePastDays'
 import ClubSharePanel from '../components/ClubSharePanel'
 import ClubSettingsPanel from '../components/ClubSettingsPanel'
-import OutstandingPanel from '../components/OutstandingPanel'
 import { SkeletonHead, SkeletonList } from '../components/Skeleton'
 import { clock, thaiDate, todayISO } from '../utils/date'
 import { useConfirm } from '../hooks/useConfirm'
@@ -19,6 +18,10 @@ const STATUS_LABEL = {
 
 const formatThaiDate = (v) =>
   thaiDate(v, { weekday: 'short', day: 'numeric', month: 'short', year: '2-digit' })
+
+/** ช่อง "คนละ" ของวันหนึ่ง — หารตามเกมแต่ละคนจ่ายไม่เท่ากัน (v_club_days ให้ per_person เป็น null) */
+const perPersonLabel = (day) =>
+  day.splitMode === 'games' ? 'ตามเกม' : day.perPerson.toLocaleString('th-TH')
 
 function formatTimeRange(start, end) {
   if (!start && !end) return null
@@ -36,7 +39,6 @@ export default function ClubPage() {
     startDay,
     cancelDay,
     renameClub,
-    setPromptPay,
     deleteClub,
   } = useClubDays(clubId)
   // อ่านนาฬิกาครั้งเดียวตอน mount — ไม่อ่านระหว่าง render
@@ -120,7 +122,6 @@ export default function ClubPage() {
         <div className="tab-bar" role="tablist">
           {[
             { id: 'days', label: 'วันเล่น' },
-            { id: 'outstanding', label: 'ค้างจ่าย' },
             { id: 'share', label: 'คนในก๊วน' },
             { id: 'settings', label: 'ตั้งค่า' },
           ].map((t) => (
@@ -139,9 +140,7 @@ export default function ClubPage() {
 
         {actionError && <p className="auth-error">{actionError}</p>}
 
-        {tab === 'outstanding' ? (
-          <OutstandingPanel clubId={clubId} club={club} canEdit={canEdit} />
-        ) : tab === 'share' ? (
+        {tab === 'share' ? (
           <ClubSharePanel clubId={clubId} isOwner={club.role === 'owner'} />
         ) : tab === 'settings' ? (
           <ClubSettingsPanel
@@ -149,7 +148,6 @@ export default function ClubPage() {
             // total_days นับทุกสถานะ รวม playing กับ cancelled ที่ cascade ก็ลบไปด้วย
             stats={{ dayCount: club.totalDays }}
             onRename={renameClub}
-            onSavePromptPay={setPromptPay}
             onDelete={async () => {
               await deleteClub()
               navigate('/')
@@ -283,7 +281,7 @@ function PastDaysTable({ clubId }) {
                   {day.status === 'cancelled' ? '—' : day.totalFee.toLocaleString('th-TH')}
                 </td>
                 <td className="is-num mono">
-                  {day.status === 'cancelled' ? '—' : day.perPerson.toLocaleString('th-TH')}
+                  {day.status === 'cancelled' ? '—' : perPersonLabel(day)}
                 </td>
               </tr>
             ))}
@@ -338,8 +336,8 @@ function DayRow({ day, clubId, canEdit, canStart, overdue = false, onStart, onCa
         {day.status === 'done' && (
           <div className="day-row-meta mono">
             {day.playerCount} คน · {day.gameCount} เกม · รวม{' '}
-            {day.totalFee.toLocaleString('th-TH')} บาท · คนละ{' '}
-            {day.perPerson.toLocaleString('th-TH')} บาท
+            {day.totalFee.toLocaleString('th-TH')} บาท ·{' '}
+            {day.splitMode === 'games' ? 'หารตามเกม' : `คนละ ${perPersonLabel(day)} บาท`}
           </div>
         )}
       </Link>

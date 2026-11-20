@@ -13,7 +13,9 @@ export function mapDay(row) {
     venueName: row.venue_name,
     shuttleBrandName: row.shuttle_brand_name,
     totalFee: Number(row.total_fee ?? 0),
+    // หารตามเกม per_person เป็น null (แต่ละคนจ่ายไม่เท่ากัน) — หน้าจอดู splitMode แล้วเขียนว่า "ตามเกม"
     perPerson: Number(row.per_person ?? 0),
+    splitMode: row.split_mode ?? 'equal',
     playerCount: Number(row.player_count ?? 0),
     gameCount: Number(row.game_count ?? 0),
   }
@@ -33,6 +35,7 @@ function dayParams(payload) {
     p_shuttle_count: payload.shuttleCount ?? 0,
     p_queue_mode: payload.queueMode ?? 'rotate',
     p_force_rest: payload.forceRest ?? true,
+    p_split_mode: payload.splitMode ?? 'equal',
     p_courts: payload.courts ?? null,
     p_note: payload.note || null,
   }
@@ -153,23 +156,6 @@ export function useClubDays(clubId) {
     [clubId, refetch],
   )
 
-  // พร้อมเพย์ของคนเก็บเงิน (RLS ยอมเฉพาะเจ้าของ) — ว่าง = ลบ
-  const setPromptPay = useCallback(
-    async (id, name) => {
-      const { error: err } = await supabase
-        .from('clubs')
-        .update({ promptpay_id: id || null, promptpay_name: name?.trim() || null })
-        .eq('id', clubId)
-      if (err) {
-        // check constraint ของเลขพร้อมเพย์ — ข้อความ Postgres เป็นอังกฤษ แปลให้
-        if (err.code === '23514') throw new Error('เลขพร้อมเพย์ต้องเป็นเบอร์มือถือ 10 หลัก เลขบัตร 13 หลัก หรือ e-wallet 15 หลัก')
-        throw new Error(err.message)
-      }
-      refetch()
-    },
-    [clubId, refetch],
-  )
-
   // ลบก๊วน = cascade ลบวันเล่น ผู้เล่น เกม และยอดเงินทั้งหมดของก๊วนนั้น
   // RLS ยอมเฉพาะเจ้าของ (policy "owner deletes club")
   const deleteClub = useCallback(async () => {
@@ -189,7 +175,6 @@ export function useClubDays(clubId) {
     startDay,
     cancelDay,
     renameClub,
-    setPromptPay,
     deleteClub,
   }
 }

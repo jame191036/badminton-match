@@ -9,7 +9,7 @@ npm run dev      # Vite dev server
 npm run build    # production build
 npm run preview  # serve the build
 npm run lint     # eslint .
-npm run check    # assert-based self-check of src/utils/{pairing,billing,promptpay,report}.js
+npm run check    # assert-based self-check of src/utils/{pairing,billing,report}.js
 ```
 
 No test framework is set up in this repo.
@@ -22,7 +22,7 @@ A badminton club ("ก๊วน") manager, two layers deep: a **club** is the st
 
 Rationale for every structural decision lives in [`docs/redesign-plan.md`](docs/redesign-plan.md) — read it before changing the shape of anything.
 
-Stack: React 19 + Vite (aliased to `rolldown-vite`) + Supabase (auth, Postgres, realtime) + react-router-dom + `qrcode-generator` (only to draw the PromptPay QR). No state library, no CSS framework — plain CSS in `src/index.css` / `src/app.css` driven by CSS variables and a `data-theme` attribute.
+Stack: React 19 + Vite (aliased to `rolldown-vite`) + Supabase (auth, Postgres, realtime) + react-router-dom. No state library, no CSS framework — plain CSS in `src/index.css` / `src/app.css` driven by CSS variables and a `data-theme` attribute.
 
 ## Architecture
 
@@ -38,7 +38,7 @@ Auth is email + password (`useAuth`), with a reset-password flow: `onAuthStateCh
 - Single-table writes go through `supabase.from(...)`; anything touching multiple tables goes through an RPC in `supabase/functions.sql` so it is one transaction.
 - `match_players` has no `session_id` column, so its subscription has no filter and fires for all rows; `refetchAll` filters.
 
-**Pairing logic is pure and isolated** in `src/utils/pairing.js` — keep it that way; it, `billing.js`, `promptpay.js` and `report.js` in `src/utils/` are the parts of the app testable without a database. Node runs them directly for `npm run check`, so imports between them must carry the `.js` extension. Skill is 1–3 and `SKILL_LEVELS` here is the single source of the labels.
+**Pairing logic is pure and isolated** in `src/utils/pairing.js` — keep it that way; it, `billing.js` and `report.js` in `src/utils/` are the parts of the app testable without a database. Node runs them directly for `npm run check`, so imports between them must carry the `.js` extension. Skill is 1–3 and `SKILL_LEVELS` here is the single source of the labels.
 
 `pickNextMatch(waiting, { mode, pairStats, forceRest })` is controlled by **two independent settings**, not one list of modes. `sessions.queue_mode` picks how pairs are chosen and `sessions.force_rest` toggles the rest rule; every combination is valid, so the UI shows two controls rather than three buttons.
 
@@ -131,29 +131,43 @@ Note `players.status = 'playing'` means "assigned to a court", including a `pend
 
 All views are declared `security_invoker = on` so RLS on the underlying tables actually applies — without it a view runs as its owner and any authenticated user could read another owner's session by guessing its id. Keep that setting on any new view.
 
-Views `v_match_history`, `v_session_player_stats`, `v_session_summary`, `v_club_days`, `v_my_clubs`, `v_member_stats` and `v_club_outstanding` are queried. `v_club_days` is the club's calendar — for a `done` day it reads the frozen `final_*` columns and for any other day it shows a live estimate; never make the `done` branch recompute. The list of people a club is shared with is an RPC (`list_club_members`), not a view, because `authenticated` cannot select from `auth.users` and `security_invoker` would therefore fail.
+Views `v_match_history`, `v_session_player_stats`, `v_session_summary`, `v_club_days`, `v_my_clubs` and `v_member_stats` are queried. `v_club_days` is the club's calendar — for a `done` day it reads the frozen `final_*` columns and for any other day it shows a live estimate; never make the `done` branch recompute. The list of people a club is shared with is an RPC (`list_club_members`), not a view, because `authenticated` cannot select from `auth.users` and `security_invoker` would therefore fail.
 
-Minutes played are derived from `matches.started_at`/`ended_at` in `v_session_player_stats` and merged onto players as `minutesPlayed` — `players.games_played` stays the column that drives queue order. Billing is recomputed client-side in `BillingPanel.jsx` and must stay in agreement with `v_billing_summary`:
+Minutes played are derived from `matches.started_at`/`ended_at` in `v_session_player_stats` and merged onto players as `minutesPlayed` — `players.games_played` stays the column that drives queue order. The total is recomputed client-side and must stay in agreement with `v_billing_summary`:
 
 ```
 court   = Σ(courts.hours) × sessions.hourly_rate   -- 1 court row = 1 booking, so hours are per court
 shuttle = sessions.shuttle_count × sessions.shuttle_price
-each    = (court + shuttle) / players where paying and status <> 'absent'
+total   = court + shuttle
 ```
 
-The split is **equal among everyone who actually turned up** — never per game or per minute played. Two exclusions only: `paying = false`, and `status = 'absent'` (signed up in advance but did not come). Resting and playing players still count as payers.
+How the total is divided is the organiser's choice per day, `sessions.split_mode` (migration 121):
 
-The formula exists once client-side, `computeBilling` in `src/utils/billing.js`; both the billing tab and the collect tab use it.
+```
+equal   each = total / payers                         -- everyone who came pays the same
+games   each = total × own games / Σ games of payers  -- = per-game price × own games
+```
 
-**Collecting money.** `players.paid_at` (null = unpaid) is ticked from the day's "เก็บเงิน" tab or the club's "ค้างจ่าย" tab — a plain single-table update, allowed for owner/editor by the existing players policy, **including after the day is closed**, because most people transfer after playing. `v_club_outstanding` lists one row per payer per `done` day still unpaid, at the frozen `final_per_person`; a day still playing is never debt because its total can move. The per-person amount is frozen, but *who* is a payer is still read live from `players.status` / `paying`. So `trg_players_lock_closed_day` (migration 120) freezes a closed day's players: only `paid_at` and `member_id` can change, and `member_id` changes only because `on delete set null` runs when a member is deleted. Inserts and deletes are refused too, unless the whole day or club is being deleted: the cascade has already removed the `sessions` row, so the trigger finds no day and lets it through. Without the trigger, flipping attendance after the close made the debts add up to 972 against a frozen 810. The UI already hides those controls on a closed day, so the trigger is for the stale second phone that never got the realtime update. The app groups those rows per member across days (`groupOutstanding`); guests have no member, so each of their days stays separate and the reminder text dates them. The collect tab also shows each member's unpaid earlier days and can settle today plus those in one tap.
+Payers are the same in both modes: `paying = true` and `status <> 'absent'`. In `equal`, resting players still pay a full share. In `games`, someone who came but never played pays 0. "Games" means `players.games_played`, which `finish_match` counts only for people still in the match, so a player benched before the start isn't charged for that game. With no finished game yet, `games` gives everyone 0, not a division by zero.
 
-PromptPay lives on the club (`promptpay_id`, `promptpay_name`), set by the owner only (clubs update policy) and readable by every member — they need it to pay. `promptPayPayload` builds the EMVCo string by hand (tag-length-value + CRC-16/CCITT-FALSE); it was checked byte-for-byte against the `promptpay-qr` library and by decoding the rendered QR, and `npm run check` pins those payloads. Messages go out through `navigator.share` on phones (so LINE is one tap) and fall back to the clipboard.
+This replaced a fixed equal split (decided 2026-09-10); the owner asked for the choice in 2026-11. `equal` stays the default, and every day that existed before 121 is `equal`, so no past total moved.
+
+The formulas exist once, client-side: `computeBilling` (total) and `splitShares` (division) in `src/utils/billing.js`. The billing tab, the closed-day box and the PDF/PNG report all use them. SQL stores only the chosen mode. `v_billing_summary.per_person` and `final_per_person` are the equal-split figures. `v_club_days.per_person` is null for `games` days, because there is no single per-person amount; the UI then shows "ตามเกม".
+
+**A closed day's per-person amounts are derived, not stored.** They come from three things that are all frozen:
+- `final_total_fee`.
+- The closed day's players, locked by `trg_players_lock_closed_day` (migration 120). Only `paid_at` and `member_id` can change, and `member_id` changes only because `on delete set null` runs when a member is deleted. Inserts and deletes are refused too, unless the whole day or club is being deleted: the cascade has already removed the `sessions` row, so the trigger finds no day and lets it through.
+- `split_mode`, which `trg_sessions_lock_closed_split` (migration 121) refuses to change once the day is `done`.
+
+Without these locks, flipping attendance after the close made the per-person amounts add up to 972 against a frozen 810. The UI already hides those controls on a closed day, so the locks are for a stale second phone that never got the realtime update. The billing tab is hidden on a closed day because it recomputes from current prices. When the day was split by games, the "ยอดที่ล็อกไว้" box at the top of the day page therefore lists each payer's amount.
+
+**No money collection.** Paid ticks, the club's outstanding-debt tab, PromptPay QR and LINE payment messages were removed at the owner's request (migration 121 drops `v_club_outstanding`). The data was deliberately **kept**: `players.paid_at` and `clubs.promptpay_id` / `promptpay_name` still exist and nothing in the app reads them, in case the feature returns. The code is in git history before that commit.
 
 Prices live on the day, never on the master row. `venues.default_hourly_rate` exists purely to prefill the form and is copied into `sessions.hourly_rate`; nothing reads it at billing time. `shuttle_brands` deliberately has no price column at all.
 
 Realtime must be enabled for `players`, `courts`, `matches`, `match_players`, `sessions` — the `alter publication supabase_realtime ...` line in `schema.sql` is commented out, so it is done in the dashboard.
 
-**Exporting a day report.** `buildDayReport` in `src/utils/report.js` is the single data model; `DayReport.jsx` renders it as DOM for printing and `reportImage.js` draws the same model onto a canvas as a PNG. Both must show the same numbers, which is why the model is one pure, node-checked function rather than two renderers each doing their own arithmetic — and why it, not the callers, decides that a `done` day reads `final_*` while any other day reads the live `computeBilling` result.
+**Exporting a day report.** `buildDayReport` in `src/utils/report.js` is the single data model; `DayReport.jsx` renders it as DOM for printing and `reportImage.js` draws the same model onto a canvas as a PNG. Both must show the same numbers, which is why the model is one pure, node-checked function rather than two renderers each doing their own arithmetic — and why it, not the callers, decides that a `done` day reads `final_*` while any other day reads the live `computeBilling` result. When the day is split by games it adds a per-person amount column (`reportColumns(report)`), and the fourth tile becomes the per-game price instead of "คนละ".
 
 PDF is `window.print()` plus a `@media print` block, deliberately not jsPDF: jsPDF cannot lay out Thai (tone marks land in the wrong place) without an embedded Thai font, which would cost a few hundred KB for a worse result, while the browser already renders the page correctly and keeps the text selectable. The print block hides the whole UI and reveals `.print-only`, and `DayReport` sits outside the tab switch so printing works from any tab — printing the live page would only ever capture whichever tab happens to be open.
 

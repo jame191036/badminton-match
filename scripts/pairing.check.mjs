@@ -1,7 +1,6 @@
 import assert from 'node:assert'
 import { pickNextMatch, pairKey, repeatGroupReason } from '../src/utils/pairing.js'
-import { computeBilling, groupOutstanding, dayPaymentText, outstandingText } from '../src/utils/billing.js'
-import { promptPayPayload, crc16, isPromptPayId } from '../src/utils/promptpay.js'
+import { computeBilling, splitShares } from '../src/utils/billing.js'
 import { buildDayReport, reportColumns } from '../src/utils/report.js'
 import { mmss } from '../src/utils/date.js'
 const P = (id, skill, g = 0) => ({ id, skill, gamesPlayed: g, queuedAt: id })
@@ -100,28 +99,36 @@ assert.equal(warn(groupY, { busyCourts: 1, mode: 'sequential' }), null)
 assert.equal(warn([1, 2, 3, 4].map((i) => P(i, 2)), { busyCourts: 1 }), null)
 
 // billing: absent and non-paying excluded from the divisor, resting still pays
-const who = [{ status: 'waiting' }, { status: 'resting' }, { status: 'absent' }, { status: 'playing', paying: false }]
+const who = [{ id: 'w', status: 'waiting' }, { id: 'r', status: 'resting' }, { id: 'a', status: 'absent' }, { id: 'x', status: 'playing', paying: false }]
 const bill = computeBilling({ players: who, courts: [{ hours: 2 }, { hours: '1.5' }], billing: { hourlyRate: '200', shuttlePrice: '80', shuttleCount: '3' } })
-assert.deepEqual([bill.total, bill.payerCount, bill.perPerson], [940, 2, 470])
+assert.deepEqual([bill.total, bill.payerCount, bill.perPerson, bill.splitMode], [940, 2, 470, 'equal'])
+assert.deepEqual([...bill.shares], [['w', 470], ['r', 470]])
 
-// outstanding: members merge across days, guests stay per day, biggest debt first
-const g = groupOutstanding([
-  { memberId: 'm1', playerId: 'p1', name: 'Ae', playDate: '2026-09-20', amount: 130 },
-  { memberId: 'm1', playerId: 'p2', name: 'Ae', playDate: '2026-09-13', amount: 120 },
-  { memberId: null, playerId: 'p3', name: 'Guest', playDate: '2026-09-20', amount: 130 },
-  { memberId: null, playerId: 'p4', name: 'Guest', playDate: '2026-09-13', amount: 120 },
-])
-assert.deepEqual(g.map((x) => [x.name, x.total, x.days.length]), [['Ae', 250, 2], ['Guest', 130, 1], ['Guest', 120, 1]])
-assert.equal(g[0].days[0].playDate, '2026-09-13')
-assert.ok(outstandingText({ clubName: 'C', groups: g, club: {} }).includes('Guest 130 บาท (แขก 20 ก.ย.)'))
-assert.ok(dayPaymentText({ clubName: 'C', dateLabel: 'd', total: 260, perPerson: 130, live: true,
-  payers: [{ name: 'Ae', paidAt: 'x' }, { name: 'Bee' }], club: { promptpayId: '0812345678' } }).includes('ยังไม่จ่าย (1): Bee'))
-
-// PromptPay: CRC standard check value + payloads matched against the promptpay-qr library
-assert.equal(crc16('123456789'), '29B1')
-assert.equal(promptPayPayload('0812345678'), '00020101021129370016A000000677010111011300668123456785802TH530376463045D82')
-assert.equal(promptPayPayload('0812345678', 130), '00020101021229370016A000000677010111011300668123456785802TH53037645406130.00630496CE')
-assert.ok(isPromptPayId('0812345678') && isPromptPayId('1234567890123') && !isPromptPayId('081234567'))
+// split by games: the whole total in proportion to games played (= price per game x own games).
+// 1,110 over 20 player-games (5 games x 4) -> 55.5 a game: 6 games pay 333, 2 games pay 111.
+// Someone who came but never played pays 0; absent and non-paying stay out of the divisor.
+const day = [
+  { id: 'nont', status: 'waiting', gamesPlayed: 6 },
+  { id: 'em', status: 'waiting', gamesPlayed: 6 },
+  { id: 'dream', status: 'resting', gamesPlayed: 6 },
+  { id: 'fah', status: 'waiting', gamesPlayed: 2 },
+  { id: 'late', status: 'waiting', gamesPlayed: 0 },
+  { id: 'gone', status: 'absent', gamesPlayed: 0 },
+  { id: 'guest', status: 'waiting', gamesPlayed: 4, paying: false },
+]
+const byGames = splitShares({ players: day, total: 1110, splitMode: 'games' })
+assert.deepEqual([byGames.payerGames, byGames.perGame, byGames.perPerson], [20, 55.5, null])
+assert.deepEqual([byGames.shares.get('nont'), byGames.shares.get('fah'), byGames.shares.get('late')], [333, 111, 0])
+assert.ok(!byGames.shares.has('gone') && !byGames.shares.has('guest'))
+assert.equal([...byGames.shares.values()].reduce((a, b) => a + b, 0), 1110) // nothing lost or invented
+// the same people split equally: 5 payers, 222 each, games don't matter
+const equal = splitShares({ players: day, total: 1110, splitMode: 'equal' })
+assert.deepEqual([equal.payerCount, equal.perPerson, equal.shares.get('late')], [5, 222, 222])
+// no game finished yet: everybody 0 — not a division by zero
+const none = splitShares({ players: day.map((p) => ({ ...p, gamesPlayed: 0 })), total: 1110, splitMode: 'games' })
+assert.deepEqual([none.perGame, Math.max(...none.shares.values())], [0, 0])
+// computeBilling passes the mode through to the same split
+assert.equal(computeBilling({ players: day, courts: [{ hours: 2 }], billing: { hourlyRate: '300', shuttlePrice: '85', shuttleCount: '6' }, splitMode: 'games' }).shares.get('nont'), 333)
 
 // variety: partner freshness wins outright, so the pair that has played together
 // must be split even when that means reaching past the head of the queue
@@ -153,12 +160,12 @@ assert.ok(ids(pickNextMatch(starved, { mode: 'variety', pairStats: far })).inclu
 // the PDF and the PNG share this one model, so a slip here shows up in both
 const REP = {
   players: [
-    { name: 'Ae', status: 'waiting', gamesPlayed: 5, minutesPlayed: 60 },
-    { name: 'Bee', status: 'waiting', gamesPlayed: 2, minutesPlayed: 20 },
-    { name: 'Cee', status: 'absent', gamesPlayed: 0, minutesPlayed: 0 },
+    { id: 'ae', name: 'Ae', status: 'waiting', gamesPlayed: 5, minutesPlayed: 60 },
+    { id: 'bee', name: 'Bee', status: 'waiting', gamesPlayed: 2, minutesPlayed: 20 },
+    { id: 'cee', name: 'Cee', status: 'absent', gamesPlayed: 0, minutesPlayed: 0 },
   ],
   summary: { finishedGames: 7, totalPlayMinutes: 80 },
-  billing: { total: 999, perPerson: 499.5, payerCount: 2 },
+  billing: { total: 999, splitMode: 'equal', perPerson: 499.5, payerCount: 2, shares: new Map([['ae', 499.5], ['bee', 499.5]]) },
   clubName: 'ก๊วนทดสอบ',
 }
 const openDay = { playDate: '2026-09-26', status: 'playing', startTime: '19:00:00', endTime: '21:00:00', venueName: 'สนาม A', finals: {} }
@@ -175,7 +182,18 @@ assert.equal(rep.tiles[2].value, '500 บาท') // จบแล้ว = ยอ
 assert.equal(rep.tiles[3].value, '250 บาท')
 assert.ok(!rep.notes.some((n) => n.includes('ยังไม่จบ')))
 // ทุกคอลัมน์ต้องมีค่าในทุกแถว ไม่งั้น PDF กับรูปจะมีช่องว่างโผล่
-assert.ok(reportColumns().every((c) => rep.rows.every((r) => r[c.key] !== undefined)))
+assert.ok(reportColumns(rep).every((c) => rep.rows.every((r) => r[c.key] !== undefined)))
+assert.ok(!reportColumns(rep).some((c) => c.key === 'amount')) // หารเท่ากัน: ช่อง "คนละ" บอกแล้ว ไม่ต้องมีคอลัมน์ยอด
+
+// หารตามเกม + จบวันแล้ว: ยอดรายคนคิดจากยอดรวมที่ล็อกไว้ (500) ไม่ใช่ยอดสด (999)
+// Ae 5 เกม Bee 2 เกม = 7 ส่วน → เกมละ 71.43 · ต้องมีคอลัมน์ยอดรายคน และช่องสุดท้ายเป็น "เกมละ"
+rep = buildDayReport({ ...REP, day: { ...openDay, status: 'done', splitMode: 'games', finals: frozen } })
+assert.equal(rep.splitMode, 'games')
+assert.deepEqual([rep.tiles[3].label, rep.tiles[3].value], ['เกมละ ต่อคน', '71.43 บาท'])
+assert.deepEqual(rep.rows.map((r) => r.amount), ['357.14', '142.86'])
+assert.ok(reportColumns(rep).some((c) => c.key === 'amount'))
+assert.ok(reportColumns(rep).every((c) => rep.rows.every((r) => r[c.key] !== undefined)))
+assert.ok(rep.notes.some((n) => n.includes('หารตามจำนวนเกม')))
 
 // court clock: a game left running past an hour must read as hours, not "264:50"
 assert.equal(mmss(13), '00:13')
