@@ -5,6 +5,9 @@
   /* ความสูงแถบบน — แถบแท็บที่ sticky ต้องหยุดใต้เส้นนี้ ไม่ใช่ที่ขอบจอ
      ไม่งั้นมันจะเลื่อนไปมุดอยู่หลังแถบบนจนมองไม่เห็น */
   --bar-h: 58px;
+  /* ความสูงขั้นต่ำของการ์ดคอร์ต = การ์ด "รอเริ่ม" ที่สูงที่สุด (ผู้เล่น 2×2 + คำอธิบายกดค้าง
+     + สไลเดอร์ วัดที่จอ 375px ได้ 354) ทุกสถานะใช้ค่าเดียวกัน ปัดเริ่ม/จบแล้วการ์ดถัดไปไม่ขยับ */
+  --court-card-min-h: 356px;
 }
 
 /* ---------- แถบบน ---------- */
@@ -35,7 +38,7 @@
   margin-right: 6px;
   color: inherit;
   text-decoration: none;
-  font-family: 'Kanit', 'IBM Plex Sans Thai', sans-serif;
+  font-family: var(--font-display);
   font-weight: 700;
   font-size: 1.02rem;
   letter-spacing: -0.01em;
@@ -240,10 +243,16 @@
   border-radius: 10px;
   font-weight: 600;
   font-size: 0.95rem;
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  transition:
+    scale var(--press-duration) var(--ease-out),
+    transform 0.12s var(--ease-out),
+    box-shadow 0.12s ease;
 }
 
-.btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(232,96,76,0.3); }
+/* hover เฉพาะเมาส์ — บนจอสัมผัส hover ค้างหลังแตะ ปุ่มจะลอยค้างเหมือนยังถูกกดอยู่ */
+@media (hover: hover) and (pointer: fine) {
+  .btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(232,96,76,0.3); }
+}
 
 /* <Link> ที่อยากให้หน้าตาเหมือนปุ่ม (a ไม่มี padding/จัดกลางเหมือน button) */
 .btn-link {
@@ -265,13 +274,19 @@
   font-size: 0.85rem;
   font-weight: 500;
   border: 1px solid var(--border);
+  transition:
+    scale var(--press-duration) var(--ease-out),
+    background-color 0.15s ease;
 }
 
-.btn-ghost:hover:not(:disabled) { background: var(--surface-muted); }
 .btn-ghost:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .btn-danger { color: var(--coral); }
-.btn-danger:hover { background: var(--surface-muted); }
+
+@media (hover: hover) and (pointer: fine) {
+  .btn-ghost:hover:not(:disabled) { background: var(--surface-muted); }
+  .btn-danger:hover { background: var(--surface-muted); }
+}
 
 .empty-state {
   color: var(--text-faint);
@@ -284,7 +299,7 @@
 /* Queue */
 /* จอแคบวางซ้อนกัน จอกว้างค่อยแตกเป็นคอลัมน์ (ดูกฎ min-width ท้ายไฟล์) */
 .queue-wrap { display: flex; flex-direction: column; gap: 24px; }
-.queue-col h3 { font-size: 0.95rem; margin-bottom: 10px; color: var(--court-dark); }
+.queue-col h3 { font-size: 0.95rem; margin-bottom: 10px; color: var(--court-ink); }
 .queue-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 
 .queue-item {
@@ -332,7 +347,7 @@
   margin-bottom: 16px;
 }
 
-.queue-mode-label { font-size: 0.82rem; color: var(--text-faintest); }
+.queue-mode-label { font-size: 0.82rem; color: var(--text-faint); }
 
 .queue-mode-options {
   display: inline-flex;
@@ -351,6 +366,10 @@
   padding: 5px 14px;
   border-radius: 999px;
   cursor: pointer;
+  transition:
+    scale var(--press-duration) var(--ease-out),
+    background-color 0.15s ease,
+    color 0.15s ease;
 }
 
 .queue-mode-btn.active {
@@ -359,7 +378,7 @@
   font-weight: 600;
 }
 
-.queue-mode-hint { font-size: 0.78rem; color: var(--text-faintest); }
+.queue-mode-hint { font-size: 0.78rem; color: var(--text-faint); }
 
 /* ขึ้นบรรทัดใหม่เต็มความกว้าง — เป็นสวิตช์ของตัวเอง ไม่ใช่ตัวเลือกที่สามของโหมด
    ถ้าวางต่อท้ายปุ่มโหมดจะอ่านเหมือนเป็นปุ่มพวกเดียวกัน */
@@ -368,6 +387,8 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
+  /* ทั้งแถว (ช่องติ๊ก + ข้อความ) คือพื้นที่กด ช่องติ๊ก 16px อย่างเดียวเล็กเกินนิ้ว */
+  min-height: var(--tap-min);
   font-size: 0.85rem;
   color: var(--text);
   cursor: pointer;
@@ -390,50 +411,172 @@
 .rest-toggle-hint {
   display: block;
   font-size: 0.78rem;
-  color: var(--text-faintest);
+  color: var(--text-faint);
 }
 
+/* ---------- การ์ดคอร์ต ----------
+   สถานะบอกด้วยสีขอบ: เขียว = กำลังเล่น · coral = รอเริ่ม · เส้นประ = ว่าง
+   เริ่ม/จบเกม = ปัดสไลเดอร์ (SlideToConfirm) · พัก = กดค้างที่ช่องชื่อ — แตะพลาดตอนเลื่อนจอไม่มีผล */
 .court-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 16px;
+  /* min(): จอแคบกว่า 320px ก็ไม่ล้น — เหลือคอลัมน์เดียวเต็มความกว้าง */
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
+  gap: 14px;
 }
 
 .court-card {
-  border-radius: 12px;
-  padding: 18px;
-  border: 1.5px dashed var(--border);
-  min-height: 140px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  /* ทุกสถานะสูงเท่ากัน — จบเกมแล้วการ์ดไม่หด การ์ดถัดไปจึงไม่กระโดดขึ้นมาใต้นิ้ว
+     ปุ่มหลักของทุกสถานะอยู่ชิดล่างเพราะเนื้อหาตรงกลางเป็น flex: 1 */
+  min-height: var(--court-card-min-h);
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  /* เปลี่ยนแค่สี ไม่ขยับ — หน้านี้กดหลายสิบครั้งต่อวัน */
+  transition: border-color 200ms ease;
 }
 
-.court-card.occupied {
-  border-style: solid;
-  border-color: var(--court);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--court) 8%, transparent), transparent);
+.court-card.is-playing { border-color: color-mix(in srgb, var(--court) 55%, var(--border)); }
+.court-card.is-pending { border-color: color-mix(in srgb, var(--coral) 55%, var(--border)); }
+.court-card.is-empty { border-style: dashed; }
+
+.court-head { display: flex; align-items: center; gap: 4px; min-height: var(--tap-min); }
+.court-name { font-size: 1.1rem; color: var(--text); }
+/* สถานะ/นาฬิกา/ยกเลิก ชิดขวาเป็นกลุ่มเดียว (ชื่อกับปุ่มดินสอชิดซ้าย) */
+.court-head-end { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+
+@media (hover: hover) and (pointer: fine) {
+  .court-card:hover .btn-icon { color: var(--text-muted); }
 }
 
-/* จับคู่แล้วแต่ยังไม่กดเริ่ม — สลับตัวได้ ยังไม่จับเวลา */
-.court-card.pending {
-  border-style: solid;
-  border-color: var(--coral);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--coral) 8%, transparent), transparent);
+/* นาฬิกาคือข้อมูลเดียวที่ขยับอยู่บนการ์ด — ใช้ตัดสินว่าจะเรียกจบเกมหรือยัง */
+.court-clock {
+  font-size: 1.4rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--court-ink);
 }
 
-/* center ไม่ใช่ baseline เพราะมีปุ่มดินสอสูง 28px คั่นอยู่ระหว่างชื่อกับสถานะ */
-.court-head { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
-.court-name { font-size: 1.05rem; color: var(--court-dark); }
+.court-status { font-size: 0.85rem; font-weight: 600; color: var(--coral); }
+.court-status.is-empty { color: var(--text-faint); font-weight: 500; }
 
-/* ดันปุ่มดินสอให้ติดชื่อ แล้วปล่อยที่ว่างที่เหลือไปดันสถานะ/นาฬิกาไปชิดขวา */
-.court-head .btn-icon { margin-right: auto; }
-.court-card:hover .btn-icon { color: var(--text-muted); }
-.court-empty-msg { color: var(--text-faintest); margin: 0; flex: 1; }
+.court-cancel {
+  min-height: var(--tap-min);
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  font-weight: 600;
+  transition: scale var(--press-duration) var(--ease-out), color 150ms ease;
+}
 
-.court-status { font-size: 0.8rem; }
-.court-status.is-pending { color: var(--coral); font-weight: 600; }
-.court-status.is-playing { color: var(--court-dark); }
+/* ผู้เล่น 2×2: แถวบน A แถวล่าง B คั่นด้วย VS */
+.court-tiles {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  align-content: center;
+}
+
+/* coral เก็บไว้ให้ปุ่มกดกับคำเตือน — VS เป็นแค่ตัวคั่น */
+.court-vs {
+  grid-column: 1 / -1;
+  justify-self: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-faint);
+}
+
+.player-tile {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  min-height: 60px;
+  padding: 8px 10px 8px 28px;
+  border: 1px solid var(--border-muted);
+  border-radius: 12px;
+  background: var(--surface-muted);
+  color: var(--text);
+  font-size: 1rem;
+  text-align: left;
+}
+
+.player-tile.is-hold {
+  border-color: var(--border);
+  /* กดค้างบนมือถือต้องไม่เด้งเมนู copy/เลือกข้อความ */
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: scale var(--press-duration) var(--ease-out), border-color 150ms ease;
+}
+
+.player-tile.is-empty {
+  justify-content: center;
+  padding-left: 12px;
+  border-style: dashed;
+  background: transparent;
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+/* เติมสีจากซ้ายไปขวาตอนกดค้าง: กด = ช้าและตั้งใจ (600ms linear ตรงกับเวลาที่ต้องค้าง)
+   ปล่อย = กลับเร็ว (200ms ease-out) */
+.player-tile-fill {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--coral) 26%, transparent);
+  clip-path: inset(0 100% 0 0);
+  transition: clip-path 200ms var(--ease-out);
+  pointer-events: none;
+}
+
+.player-tile[data-holding] { border-color: var(--coral); }
+.player-tile[data-holding] .player-tile-fill { clip-path: inset(0 0 0 0); transition: clip-path 600ms linear; }
+
+.player-tile-side {
+  position: absolute;
+  top: 9px;
+  left: 10px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-faint);
+}
+
+/* ชื่อคือสิ่งที่คนจัดก๊วนอ่านแล้วตะโกนเรียก — ใหญ่ หนา ตัดบรรทัดเฉพาะที่ช่องว่าง (NameText) */
+.player-tile-name {
+  position: relative;
+  max-width: 100%;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: break-word;
+}
+
+/* ชิประดับมือ — สีมาจาก .skill-1/2/3 ชุดเดียวกับรายชื่อในคิว */
+.player-tile-skill {
+  position: relative;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.nm-part { white-space: nowrap; }
+
+/* "คอร์ตว่าง" คือสถานะ ไม่ใช่คำประกอบ — ต้องอ่านออกจากระยะแขน */
+.court-empty-msg { flex: 1; margin: 0; color: var(--text-muted); font-size: 0.95rem; }
+.court-hint { margin: -4px 0 0; font-size: 0.76rem; color: var(--text-faint); }
 
 .court-warn {
   margin: 0;
@@ -442,36 +585,92 @@
   line-height: 1.5;
 }
 
-.court-actions { display: flex; gap: 8px; }
-.court-actions .btn-primary { flex: 1; }
-
-.team-player-empty { color: var(--text-faintest); font-style: italic; }
-
-.btn-sub {
-  padding: 1px 8px;
-  font-size: 0.72rem;
-  line-height: 1.6;
+/* ปุ่มแตะของการ์ด (จับคู่ / เติมจากคิว) สูงเท่าสไลเดอร์ — สีและสถานะรอ/กดไม่ได้มาจาก .btn-primary */
+.court-button {
+  min-height: 56px;
+  border-radius: 14px;
+  font-size: 1rem;
+  font-weight: 700;
 }
 
-.court-match {
+@media (hover: hover) and (pointer: fine) {
+  .player-tile.is-hold:hover { border-color: var(--text-faintest); }
+  .court-cancel:hover { color: var(--coral); }
+}
+
+/* ---------- สไลเดอร์ยืนยัน (SlideToConfirm) ---------- */
+.slide-confirm {
+  position: relative;
+  height: 60px;
+  padding: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  box-shadow: inset 0 0 0 1px var(--border);
+  /* ลากแนวนอนเอง แต่ยังเลื่อนหน้าแนวตั้งผ่านสไลเดอร์ได้ */
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.slide-confirm.is-go { --tone: var(--court); }
+.slide-confirm.is-stop { --tone: var(--coral); }
+
+.slide-confirm-fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: left center;
+  transform: scaleX(0);
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--tone) 22%, transparent);
+}
+
+.slide-confirm-label {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex: 1;
+  justify-content: center;
+  gap: 6px;
+  padding-left: 48px;
+  color: var(--text-muted);
+  font-size: 0.98rem;
+  font-weight: 600;
+  pointer-events: none;
 }
 
-.team-side { flex: 1; display: flex; flex-direction: column; gap: 4px; }
-.team-label { font-size: 0.72rem; color: var(--text-faintest); }
-.team-player {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.9rem;
-  gap: 8px;
+.slide-confirm-knob {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--tone);
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  cursor: grab;
+  touch-action: pan-y;
 }
-.team-skill { font-size: 0.72rem; color: var(--text-faint); }
-.vs { color: var(--coral); font-weight: 700; font-size: 0.85rem; }
 
-.btn-finish { width: 100%; }
+/* กดค้างที่ปุ่มลากไม่ต้องยุบ (กฎกดปุ่มระดับ global) — ปุ่มนี้ขยับตามนิ้วอยู่แล้ว ยุบซ้อนจะดูสั่น */
+.slide-confirm-knob:not(:disabled):active { scale: none; }
+.slide-confirm[data-dragging] .slide-confirm-knob { cursor: grabbing; }
+
+/* ปล่อยมือ: เด้งกลับ/วิ่งไปสุด ด้วย transform อย่างเดียว — ระหว่างลากไม่มี transition (ตามนิ้ว 1:1) */
+.slide-confirm[data-settling] .slide-confirm-knob,
+.slide-confirm[data-settling] .slide-confirm-fill {
+  transition: transform 200ms var(--ease-out);
+}
+
+.slide-confirm[data-settling] .slide-confirm-label { transition: opacity 200ms ease; }
+.slide-confirm[data-done] .slide-confirm-fill { background: color-mix(in srgb, var(--tone) 40%, transparent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .slide-confirm[data-settling] .slide-confirm-knob,
+  .slide-confirm[data-settling] .slide-confirm-fill { transition: none; }
+}
 
 /* ---------- เก็บเงิน / ค้างจ่าย ---------- */
 .payment { display: flex; flex-direction: column; gap: 12px; }
@@ -502,7 +701,7 @@
 .qr-box img { width: 200px; height: 200px; background: #fff; padding: 8px; border-radius: 8px; image-rendering: pixelated; }
 .qr-info { display: flex; flex-direction: column; gap: 4px; }
 .qr-label { font-size: 0.8rem; color: var(--text-faint); }
-.qr-amount { font-size: 1.4rem; color: var(--court-dark); }
+.qr-amount { font-size: 1.4rem; color: var(--court-ink); }
 
 /* Stats */
 .stats-summary {
@@ -522,7 +721,7 @@
   border-radius: 12px;
 }
 
-.stat-value { font-size: 1.25rem; font-weight: 700; color: var(--court-dark); }
+.stat-value { font-size: 1.25rem; font-weight: 700; color: var(--court-ink); }
 .stat-label { font-size: 0.78rem; color: var(--text-faintest); }
 
 .stats-note {
@@ -556,7 +755,7 @@
   background: var(--surface-muted);
   color: var(--text-faintest);
 }
-.stats-status.status-playing { color: var(--court-dark); }
+.stats-status.status-playing { color: var(--court-ink); }
 .stats-status.status-resting { color: var(--coral); }
 
 .stats-games { min-width: 52px; text-align: right; }
@@ -603,7 +802,7 @@
 /* ช่วงเวลากว้างขึ้นเพราะแสดงทั้งเวลาเริ่มและเวลาจบ */
 .history-pos { color: var(--text-faintest); width: 22px; flex: none; text-align: right; }
 .history-time { color: var(--text-faintest); width: 96px; flex: none; }
-.history-court { color: var(--court-dark); font-weight: 600; min-width: 70px; }
+.history-court { color: var(--court-ink); font-weight: 600; min-width: 70px; }
 .history-teams { flex: 1; }
 .vs-inline { color: var(--coral); font-weight: 600; }
 
@@ -643,7 +842,7 @@
   flex-direction: column;
   gap: 6px;
   font-size: 0.85rem;
-  color: var(--court-dark);
+  color: var(--court-ink);
   font-weight: 600;
 }
 
@@ -652,14 +851,14 @@
   border: 1.5px solid var(--border);
   border-radius: 10px;
   font-size: 1rem;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   background: var(--surface);
   color: var(--text);
 }
 
 .billing-group-title {
   font-size: 0.9rem;
-  color: var(--court-dark);
+  color: var(--court-ink);
   margin: 0 0 10px;
 }
 
@@ -689,7 +888,7 @@
   padding: 7px 10px;
   border: 1.5px solid var(--border);
   border-radius: 8px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   background: var(--surface);
   color: var(--text);
 }
@@ -718,7 +917,7 @@
 .billing-summary-row.highlight {
   font-size: 1.05rem;
   font-weight: 700;
-  color: var(--court-dark);
+  color: var(--court-ink);
   padding-top: 8px;
   border-top: 1px dashed var(--border);
 }
@@ -726,7 +925,7 @@
 .billing-players h3 {
   font-size: 0.95rem;
   margin-bottom: 10px;
-  color: var(--court-dark);
+  color: var(--court-ink);
 }
 
 .billing-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -755,7 +954,7 @@
 
 .billing-checkbox input { width: 17px; height: 17px; accent-color: var(--court); cursor: pointer; }
 
-.billing-amount { font-size: 0.9rem; color: var(--court-dark); }
+.billing-amount { font-size: 0.9rem; color: var(--court-ink); }
 
 /* หัวข้อซ้าย ปุ่มหลักขวา — จัดกึ่งกลางแนวตั้งให้ปุ่มอยู่ระดับเดียวกับชื่อ
    (ลิงก์ย้อนกลับต้องอยู่นอกกล่องนี้ ไม่งั้นปุ่มจะไปเทียบกับบรรทัดลิงก์แทน) */
@@ -771,6 +970,7 @@
 .page-head > div:first-child { flex: 1 1 auto; min-width: 0; }
 
 .page-head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.page-head-actions .btn-ghost { min-height: var(--tap-min); }
 
 .btn-refresh { display: inline-flex; align-items: center; gap: 6px; }
 
@@ -1079,12 +1279,17 @@
   border-radius: 8px;
   background: transparent;
   color: var(--text-faintest);
-  transition: color 0.15s ease, background-color 0.15s ease;
+  transition:
+    scale var(--press-duration) var(--ease-out),
+    color 0.15s ease,
+    background-color 0.15s ease;
 }
 
 .btn-icon svg { width: 15px; height: 15px; }
-.master-row:hover .btn-icon { color: var(--text-muted); }
-.btn-icon:hover { color: var(--court); background: var(--surface-muted); }
+@media (hover: hover) and (pointer: fine) {
+  .master-row:hover .btn-icon { color: var(--text-muted); }
+  .btn-icon:hover { color: var(--court); background: var(--surface-muted); }
+}
 
 .name-edit {
   display: flex;
@@ -2051,10 +2256,15 @@
   font-size: 0.95rem;
   font-weight: 600;
   white-space: nowrap;
-  transition: color 0.15s ease, background-color 0.15s ease;
+  transition:
+    scale var(--press-duration) var(--ease-out),
+    color 0.15s ease,
+    background-color 0.15s ease;
 }
 
-.tab-btn:hover:not(.is-active) { color: var(--text); }
+@media (hover: hover) and (pointer: fine) {
+  .tab-btn:hover:not(.is-active) { color: var(--text); }
+}
 
 .tab-btn.is-active {
   background: var(--surface);
@@ -2085,10 +2295,15 @@
   font-size: 0.87rem;
   font-weight: 600;
   white-space: nowrap;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition:
+    scale var(--press-duration) var(--ease-out),
+    background-color 0.15s ease,
+    color 0.15s ease;
 }
 
-.subtab:hover:not(.is-active) { color: var(--text); }
+@media (hover: hover) and (pointer: fine) {
+  .subtab:hover:not(.is-active) { color: var(--text); }
+}
 
 .subtab.is-active {
   background: var(--surface);
@@ -2143,7 +2358,9 @@
   font-weight: 500;
 }
 
-.resting-chip:hover:not(:disabled) { border-color: var(--court); color: var(--court); }
+@media (hover: hover) and (pointer: fine) {
+  .resting-chip:hover:not(:disabled) { border-color: var(--court); color: var(--court); }
+}
 .resting-chip:disabled { opacity: 0.7; cursor: default; }
 
 .resting-strip-hint {
@@ -2493,7 +2710,7 @@
 .report-head h1 {
   margin: 0;
   font-size: 20pt;
-  font-family: 'Kanit', 'IBM Plex Sans Thai', sans-serif;
+  font-family: var(--font-display);
 }
 
 .report-when { margin: 4px 0 0; font-size: 12pt; }
@@ -2549,4 +2766,4 @@
   margin-bottom: 12px;
 }
 
-.checkin-hint { font-size: 0.78rem; color: var(--text-faintest); }
+.checkin-hint { font-size: 0.78rem; color: var(--text-faint); }

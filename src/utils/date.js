@@ -94,11 +94,20 @@ export function hoursBetween(start, end) {
   return diff / 60
 }
 
-/** วินาที -> 'mm:ss' ใช้ทั้งนาฬิกาบนคอร์ตและเวลาต่อเกมในประวัติ (null = ไม่แสดง) */
+/**
+ * วินาที -> 'mm:ss' หรือ 'h:mm:ss' เมื่อเกินชั่วโมง ใช้ทั้งนาฬิกาบนคอร์ตและเวลาต่อเกมในประวัติ
+ * (null = ไม่แสดง)
+ *
+ * เดิมไม่มีหลักชั่วโมง เกมที่ลืมกดจบขึ้นเป็น "264:50" ซึ่งอ่านไม่ออกว่าคือ 4 ชม. 24 นาที
+ */
 export function mmss(seconds) {
   if (seconds == null) return null
   const total = Math.max(0, Math.floor(seconds))
-  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+  const pad = (n) => String(n).padStart(2, '0')
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`
 }
 
 /** นาที -> '45 นาที' / '2 ชม.' / '2 ชม. 30 นาที' (0 หรือว่าง = '—') */

@@ -3,6 +3,7 @@ import { pickNextMatch, pairKey, repeatGroupReason } from '../src/utils/pairing.
 import { computeBilling, groupOutstanding, dayPaymentText, outstandingText } from '../src/utils/billing.js'
 import { promptPayPayload, crc16, isPromptPayId } from '../src/utils/promptpay.js'
 import { buildDayReport, reportColumns } from '../src/utils/report.js'
+import { mmss } from '../src/utils/date.js'
 const P = (id, skill, g = 0) => ({ id, skill, gamesPlayed: g, queuedAt: id })
 const sum = (t) => t.reduce((s, p) => s + p.skill, 0)
 // sequential: balanced split of first 4 (3+1 vs 2+2 -> gap 0)
@@ -175,5 +176,12 @@ assert.equal(rep.tiles[3].value, '250 บาท')
 assert.ok(!rep.notes.some((n) => n.includes('ยังไม่จบ')))
 // ทุกคอลัมน์ต้องมีค่าในทุกแถว ไม่งั้น PDF กับรูปจะมีช่องว่างโผล่
 assert.ok(reportColumns().every((c) => rep.rows.every((r) => r[c.key] !== undefined)))
+
+// court clock: a game left running past an hour must read as hours, not "264:50"
+assert.equal(mmss(13), '00:13')
+assert.equal(mmss(59 * 60 + 59), '59:59')
+assert.equal(mmss(3600), '1:00:00')
+assert.equal(mmss(264 * 60 + 50), '4:24:50')
+assert.equal(mmss(null), null)
 
 console.log('pairing ok')
